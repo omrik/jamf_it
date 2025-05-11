@@ -34,7 +34,10 @@ The `jamf_app_inventory.py` script provides a comprehensive inventory of install
 <details>
 <summary>Click to view screenshots</summary>
 
-*Coming soon*
+
+<img width="812" alt="Screenshot of app report" src="https://github.com/user-attachments/assets/ea1a00f4-f656-49d2-ad97-156e685729ec" />
+
+<img width="812" alt="Screenshot of outdated computers" src="https://github.com/user-attachments/assets/387759d2-fb71-41c8-81b7-cbb81a601fac" />
 
 </details>
 
