@@ -37,6 +37,113 @@ A Python script that retrieves application usage data from the Jamf Pro API and 
    chmod +x jamf_app_usage.py
    ```
 
+## API Authentication & Permissions
+
+### Setting Up API Access in Jamf Pro
+
+To use this script, you'll need to set up API access in your Jamf Pro instance using API Roles and Clients:
+
+#### Creating API Roles and Clients
+
+1. Log in to your Jamf Pro instance as an administrator
+2. Navigate to **Settings** > **System Settings** > **API Roles and Clients**
+3. First, create a role by clicking the "New Role" button
+4. Fill in the following details:
+   - **Display Name**: Choose a descriptive name (e.g., "Application Usage Reporter")
+   - **Privileges**: Assign the following minimum permissions:
+     - **Classic API**: ✓ Read (required for this script)
+     - **Computers**: ✓ Read
+     - **Computer Extension Attributes**: ✓ Read 
+     - **Static Computer Groups**: ✓ Read
+     - **Smart Computer Groups**: ✓ Read
+     - **Users**: ✓ Read
+     - **Computer Reports**: ✓ Read
+   - Click **Save** to create the role
+
+5. Next, create a client by clicking the "New Client" button
+6. Fill in the following details:
+   - **Display Name**: A descriptive name (e.g., "Application Usage Client")
+   - **Client ID**: Auto-generated or specify your own
+   - **Access Token Lifetime**: Set an appropriate duration (default is 30 minutes)
+   - **Authorization Scopes**: Select the role you just created
+7. Click **Save** to create the client
+8. Note down your **Client ID** and **Client Secret** - you'll need these for authentication
+
+#### Authentication Methods
+
+This script supports two authentication methods:
+
+##### 1. Username/Password Authentication (Legacy)
+
+If your Jamf Pro instance still supports basic authentication with the Classic API, you can use the `-u` and `-p` parameters:
+
+```bash
+./jamf_app_usage.py -a "Chrome" -s "https://your-instance.jamfcloud.com" -u "username" -p "password"
+```
+
+##### 2. Token-Based Authentication (Recommended)
+
+For more secure token-based authentication, you can create a script (`jamf_get_token.sh`) that obtains a valid token using environment variables:
+
+```bash
+#!/bin/bash
+# Check if required environment variables are set
+if [ -z "$JAMF_URL" ] || [ -z "$JAMF_CLIENT_ID" ] || [ -z "$JAMF_CLIENT_SECRET" ]; then
+    echo "Error: Missing environment variables" >&2
+    exit 1
+fi
+
+# Get the token using client credentials
+TOKEN=$(curl -s -X POST "$JAMF_URL/api/v1/auth/token" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "grant_type=client_credentials&client_id=$JAMF_CLIENT_ID&client_secret=$JAMF_CLIENT_SECRET" \
+  | grep -o '"access_token":"[^"]*' | cut -d'"' -f4)
+
+# Output the token (this will be captured by the Python script)
+echo "$TOKEN"
+```
+
+To use token authentication:
+
+1. Set your environment variables:
+   ```bash
+   export JAMF_URL="https://your-instance.jamfcloud.com"
+   export JAMF_CLIENT_ID="your-client-id"
+   export JAMF_CLIENT_SECRET="your-super-secret-key"
+   ```
+
+2. Make the script executable:
+   ```bash
+   chmod +x jamf_get_token.sh
+   ```
+
+3. Run the application usage script with the `-t` flag:
+   ```bash
+   ./jamf_app_usage.py -a "Chrome" -t
+   ```
+
+This approach keeps your credentials secure by never storing them in plaintext in the script.
+
+### Security Best Practices
+
+1. **Use Environment Variables**: Store sensitive credentials as environment variables instead of hardcoding them.
+2. **Least Privilege**: Create API clients with only the necessary permissions.
+3. **Rotate Client Secrets**: Regularly update your client secrets.
+4. **Limited Token Lifetime**: Set appropriate token lifetimes based on your usage patterns.
+5. **Audit API Usage**: Periodically review API activity in Jamf Pro logs.
+6. **Secure Storage**: Consider using a password manager or secret management service for storing credentials.
+
+### Troubleshooting Authentication Issues
+
+If you encounter authentication problems:
+
+1. **Check Environment Variables**: Ensure all required environment variables are set correctly.
+2. **Check Permissions**: Verify the API client has the appropriate privileges listed above.
+3. **API Access Enabled**: Ensure API access is enabled in your Jamf Pro instance.
+4. **Network Access**: Make sure your system can access the Jamf Pro API endpoints.
+5. **Token Expiration**: If using token authentication, ensure your token is not expired.
+6. **Legacy API Support**: If using username/password, confirm the Classic API still allows this authentication method in your Jamf Pro version.
+
 ## Usage
 
 ### Basic Usage
