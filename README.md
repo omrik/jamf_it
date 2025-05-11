@@ -152,4 +152,4 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 ## Acknowledgments
 
 - Thanks to the Jamf community for their valuable insights into the API
-- Special thanks to [original script author or inspiration] for the initial idea
+- Special thanks to https://github.com/jp-cpe/check-application-usage for the initial idea
