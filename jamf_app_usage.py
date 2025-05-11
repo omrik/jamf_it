@@ -1,5 +1,69 @@
+#!/usr/bin/env python3
+"""
+Jamf Application Usage Reporter
+
+This script retrieves application usage data from Jamf Pro API and outputs it to a CSV file.
+It shows the amount of minutes each computer has used a specific application.
+
+Features:
+- Retrieves app usage data for all computers or specific computer groups
+- Shows total minutes of usage per computer
+- Supports both username/password and token-based authentication
+- Auto-generates descriptive filenames for reports
+- Provides a discovery mode to list all applications found in usage data
+- Offers flexible app name matching for finding the right application
+- Includes debug mode for troubleshooting
+
+Author: Omri Kedem 
+Version: 1.0.30
+License: MIT
+"""
+
+import argparse
+import base64
+import csv
+import datetime
+import json
+import os
+import requests
+import subprocess
+import sys
+import xml.etree.ElementTree as ET
+from requests.auth import HTTPBasicAuth
+from urllib3.exceptions import InsecureRequestWarning
+
+# Suppress insecure HTTPS warnings (remove in production or use proper certificates)
+requests.packages.urllib3.disable_warnings(category=InsecureRequestWarning)
+
+#------------------------------------------------------------------------------
+# Core Functions
+#------------------------------------------------------------------------------
+
+def get_token():
+    """
+    Get the API token from an external script.
+    
+    Returns:
+        str: The API token if successful, None otherwise.
+    """
+    try:
+        token = subprocess.check_output(['bash', './jamf_get_token.sh'], encoding="utf-8").strip()
+        return token
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return None
+
 def create_filename(app_name, group_name=None, days=None):
-    """Create a sanitized filename based on app name and group name."""
+    """
+    Create a sanitized filename based on app name and group name.
+    
+    Args:
+        app_name (str): Name of the application
+        group_name (str, optional): Name of the computer group
+        days (int, optional): Number of days in the report
+        
+    Returns:
+        str: A sanitized filename suitable for any filesystem
+    """
     # Sanitize app name for use in filename - remove extension and problematic characters
     sanitized_app = app_name.replace('.app', '').replace('/', '_').replace('\\', '_')
     sanitized_app = sanitized_app.replace(':', '_').replace('*', '_').replace('?', '_')
@@ -25,105 +89,24 @@ def create_filename(app_name, group_name=None, days=None):
         if days:
             return f"{sanitized_app}_{days}days_{date_str}.csv"
         else:
-            return f"{sanitized_app}_{date_str}.csv"#!/usr/bin/env python3
-"""
-Jamf Application Usage Reporter
-This script retrieves application usage data from Jamf Pro API and outputs it to a CSV file.
-It shows the amount of minutes each computer has used a specific application.
-"""
+            return f"{sanitized_app}_{date_str}.csv"
 
-import argparse
-import base64
-import csv
-import datetime
-import json
-import os
-import requests
-import subprocess
-import sys
-from requests.auth import HTTPBasicAuth
-from urllib3.exceptions import InsecureRequestWarning
-
-# Suppress insecure HTTPS warnings (remove in production or use proper certificates)
-requests.packages.urllib3.disable_warnings(category=InsecureRequestWarning)
-
-def get_token():
-    """
-    Get the API token from an external script or return None if not available.
-    """
-    try:
-        token = subprocess.check_output(['bash', './jamf_get_token.sh'], encoding="utf-8").strip()
-        return token
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        return None
-
-def parse_arguments():
-    """Parse command-line arguments."""
-    # Default server URL (using a generic placeholder)
-    default_server = "https://your-instance.jamfcloud.com"
-    
-    parser = argparse.ArgumentParser(description="Retrieve application usage data from Jamf Pro API")
-    parser.add_argument('-s', '--server', default=default_server, 
-                        help=f'Jamf Pro server URL (default: {default_server})')
-    parser.add_argument('-u', '--username', help='API username (not needed if using token authentication)')
-    parser.add_argument('-p', '--password', help='API password (not needed if using token authentication)')
-    parser.add_argument('-a', '--app', required=True, help='Application name to search for (e.g., "Google Chrome.app")')
-    parser.add_argument('-d', '--days', type=int, default=30, help='Number of days to look back (default: 30)')
-    parser.add_argument('-o', '--output', help='Output CSV file name (default: auto-generated based on app and group)')
-    parser.add_argument('-t', '--token', action='store_true', help='Use token authentication from jamf_get_token.sh script')
-    parser.add_argument('-g', '--group', help='Only include computers from this Jamf computer group')
-    parser.add_argument('--insecure', action='store_true', help='Skip SSL certificate verification')
-    parser.add_argument('--debug', action='store_true', help='Enable debug mode with verbose output')
-    parser.add_argument('--list-apps', action='store_true', help='List all applications found in usage data for the first 5 computers')
-    
-    return parser.parse_args()
-
-def get_computer_group_members(server, auth_header, group_name, verify_ssl=True):
-    """Fetch the list of computer IDs that belong to a specific computer group."""
-    # Ensure server URL doesn't end with a trailing slash
-    server = server.rstrip('/')
-    
-    # First, find the group ID by name
-    url = f"{server}/JSSResource/computergroups/name/{group_name}"
-    headers = {
-        'Accept': 'application/json'
-    }
-    headers.update(auth_header)
-    
-    try:
-        response = requests.get(url, headers=headers, verify=verify_ssl)
-        response.raise_for_status()
-        
-        group_data = response.json()
-        computer_list = []
-        
-        # Extract computer ID and name from the group
-        if 'computer_group' in group_data and 'computers' in group_data['computer_group']:
-            for computer in group_data['computer_group']['computers']:
-                # Get serial number from computer details
-                detail_url = f"{server}/JSSResource/computers/id/{computer['id']}/subset/General"
-                try:
-                    detail_response = requests.get(detail_url, headers=headers, verify=verify_ssl)
-                    detail_response.raise_for_status()
-                    details = detail_response.json()
-                    
-                    if 'general' in details['computer'] and 'serial_number' in details['computer']['general']:
-                        serial_number = details['computer']['general']['serial_number']
-                        computer_list.append((computer['id'], computer['name'], serial_number))
-                    else:
-                        # Fall back to just ID and name if serial not found
-                        computer_list.append((computer['id'], computer['name'], None))
-                except:
-                    # If detail fetch fails, fall back to just ID and name
-                    computer_list.append((computer['id'], computer['name'], None))
-        
-        return computer_list
-    except requests.exceptions.RequestException as e:
-        print(f"Error fetching computer group '{group_name}': {e}", file=sys.stderr)
-        sys.exit(1)
+#------------------------------------------------------------------------------
+# Jamf API Functions
+#------------------------------------------------------------------------------
 
 def get_computer_ids(server, auth_header, verify_ssl=True):
-    """Fetch all computer IDs from Jamf Pro."""
+    """
+    Fetch all computer IDs and serial numbers from Jamf Pro.
+    
+    Args:
+        server (str): Jamf Pro server URL
+        auth_header (dict): Authentication header
+        verify_ssl (bool): Whether to verify SSL certificates
+        
+    Returns:
+        list: List of tuples containing (computer_id, computer_name, serial_number)
+    """
     # Ensure server URL doesn't end with a trailing slash
     server = server.rstrip('/')
     url = f"{server}/JSSResource/computers"
@@ -166,8 +149,78 @@ def get_computer_ids(server, auth_header, verify_ssl=True):
         print(f"Error fetching computer IDs: {e}", file=sys.stderr)
         sys.exit(1)
 
+def get_computer_group_members(server, auth_header, group_name, verify_ssl=True):
+    """
+    Fetch the list of computer IDs that belong to a specific computer group.
+    
+    Args:
+        server (str): Jamf Pro server URL
+        auth_header (dict): Authentication header
+        group_name (str): Name of the computer group
+        verify_ssl (bool): Whether to verify SSL certificates
+        
+    Returns:
+        list: List of tuples containing (computer_id, computer_name, serial_number)
+    """
+    # Ensure server URL doesn't end with a trailing slash
+    server = server.rstrip('/')
+    
+    # First, find the group ID by name
+    url = f"{server}/JSSResource/computergroups/name/{group_name}"
+    headers = {
+        'Accept': 'application/json'
+    }
+    headers.update(auth_header)
+    
+    try:
+        response = requests.get(url, headers=headers, verify=verify_ssl)
+        response.raise_for_status()
+        
+        group_data = response.json()
+        computer_list = []
+        
+        # Extract computer ID and name from the group
+        if 'computer_group' in group_data and 'computers' in group_data['computer_group']:
+            for computer in group_data['computer_group']['computers']:
+                # Get serial number from computer details
+                detail_url = f"{server}/JSSResource/computers/id/{computer['id']}/subset/General"
+                try:
+                    detail_response = requests.get(detail_url, headers=headers, verify=verify_ssl)
+                    detail_response.raise_for_status()
+                    details = detail_response.json()
+                    
+                    if 'general' in details['computer'] and 'serial_number' in details['computer']['general']:
+                        serial_number = details['computer']['general']['serial_number']
+                        computer_list.append((computer['id'], computer['name'], serial_number))
+                    else:
+                        # Fall back to just ID and name if serial not found
+                        computer_list.append((computer['id'], computer['name'], None))
+                except:
+                    # If detail fetch fails, fall back to just ID and name
+                    computer_list.append((computer['id'], computer['name'], None))
+        
+        return computer_list
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching computer group '{group_name}': {e}", file=sys.stderr)
+        sys.exit(1)
+
 def list_all_apps(server, auth_header, computer_id, computer_name, serial_number, start_date, end_date, verify_ssl=True):
-    """Fetch and list all applications used on a specific computer."""
+    """
+    Fetch and list all applications used on a specific computer.
+    
+    Args:
+        server (str): Jamf Pro server URL
+        auth_header (dict): Authentication header
+        computer_id (int): Computer ID
+        computer_name (str): Computer name
+        serial_number (str): Computer serial number
+        start_date (str): Start date in YYYY-MM-DD format
+        end_date (str): End date in YYYY-MM-DD format
+        verify_ssl (bool): Whether to verify SSL certificates
+        
+    Returns:
+        dict: Dictionary with app names as keys and total minutes as values
+    """
     # Ensure server URL doesn't end with a trailing slash
     server = server.rstrip('/')
     
@@ -194,7 +247,6 @@ def list_all_apps(server, auth_header, computer_id, computer_name, serial_number
         response.raise_for_status()
         
         # Try to parse XML response
-        import xml.etree.ElementTree as ET
         root = ET.fromstring(response.text)
         
         all_apps = []
@@ -227,7 +279,24 @@ def list_all_apps(server, auth_header, computer_id, computer_name, serial_number
         return None
 
 def get_app_usage(server, auth_header, computer_id, computer_name, serial_number, app_name, start_date, end_date, verify_ssl=True, debug=False):
-    """Fetch application usage for a specific computer."""
+    """
+    Fetch application usage for a specific computer.
+    
+    Args:
+        server (str): Jamf Pro server URL
+        auth_header (dict): Authentication header
+        computer_id (int): Computer ID
+        computer_name (str): Computer name
+        serial_number (str): Computer serial number
+        app_name (str): Application name to search for
+        start_date (str): Start date in YYYY-MM-DD format
+        end_date (str): End date in YYYY-MM-DD format
+        verify_ssl (bool): Whether to verify SSL certificates
+        debug (bool): Whether to enable debug output
+        
+    Returns:
+        dict: Dictionary with dates as keys and minutes as values
+    """
     # Ensure server URL doesn't end with a trailing slash
     server = server.rstrip('/')
     
@@ -256,7 +325,6 @@ def get_app_usage(server, auth_header, computer_id, computer_name, serial_number
         response.raise_for_status()
         
         # Try to parse XML response
-        import xml.etree.ElementTree as ET
         root = ET.fromstring(response.text)
         
         apps_data = {}
@@ -333,7 +401,49 @@ def get_app_usage(server, auth_header, computer_id, computer_name, serial_number
         print(f"Error fetching usage data for computer {computer_name} (ID: {computer_id}): {e}", file=sys.stderr)
         return None
 
+#------------------------------------------------------------------------------
+# Command Line Interface
+#------------------------------------------------------------------------------
+
+def parse_arguments():
+    """
+    Parse command-line arguments.
+    
+    Returns:
+        argparse.Namespace: Parsed arguments
+    """
+    # Default server URL (using a generic placeholder)
+    default_server = "https://your-instance.jamfcloud.com"
+    
+    parser = argparse.ArgumentParser(description="Retrieve application usage data from Jamf Pro API")
+    parser.add_argument('-s', '--server', default=default_server, 
+                        help=f'Jamf Pro server URL (default: {default_server})')
+    parser.add_argument('-u', '--username', help='API username (not needed if using token authentication)')
+    parser.add_argument('-p', '--password', help='API password (not needed if using token authentication)')
+    parser.add_argument('-a', '--app', help='Application name to search for (e.g., "Google Chrome.app")')
+    parser.add_argument('-d', '--days', type=int, default=30, help='Number of days to look back (default: 30)')
+    parser.add_argument('-o', '--output', help='Output CSV file name (default: auto-generated based on app and group)')
+    parser.add_argument('-t', '--token', action='store_true', help='Use token authentication from jamf_get_token.sh script')
+    parser.add_argument('-g', '--group', help='Only include computers from this Jamf computer group')
+    parser.add_argument('--insecure', action='store_true', help='Skip SSL certificate verification')
+    parser.add_argument('--debug', action='store_true', help='Enable debug mode with verbose output')
+    parser.add_argument('--list-apps', action='store_true', help='List all applications found in usage data for the first 5 computers')
+    
+    args = parser.parse_args()
+    
+    # Validate arguments
+    if not args.list_apps and not args.app:
+        parser.error("the --app argument is required unless --list-apps is specified")
+    
+    return args
+
+#------------------------------------------------------------------------------
+# Main Function
+#------------------------------------------------------------------------------
+
 def main():
+    """Main function that runs the script."""
+    # Parse command-line arguments
     args = parse_arguments()
     
     # Ensure server URL is properly formatted
@@ -362,7 +472,10 @@ def main():
     start_date_str = start_date.strftime('%Y-%m-%d')
     end_date_str = end_date.strftime('%Y-%m-%d')
     
-    print(f"Fetching application usage for '{args.app}' from {start_date_str} to {end_date_str}...")
+    if args.list_apps:
+        print(f"Listing applications used from {start_date_str} to {end_date_str}...")
+    elif args.app:
+        print(f"Fetching application usage for '{args.app}' from {start_date_str} to {end_date_str}...")
     
     # Get computer IDs - either from a specific group or all computers
     if args.group:
@@ -488,6 +601,10 @@ def main():
         print("- Try a partial name match (e.g., 'Chrome' instead of 'Google Chrome.app')")
         print("- Increase the number of days with -d option to look at a longer history")
         print("- Use --debug to see more detailed information about the API responses")
+
+#------------------------------------------------------------------------------
+# Entry Point
+#------------------------------------------------------------------------------
 
 if __name__ == "__main__":
     main()
