@@ -24,7 +24,7 @@ A Python script that retrieves application usage data from the Jamf Pro API and 
 
 1. Clone this repository or download the script:
    ```bash
-   git clone https://github.com/your-username/jamf-app-usage.git
+   git clone https://github.com/omrik/jamf-it.git
    ```
 
 2. Install the required packages:
