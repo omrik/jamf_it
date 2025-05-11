@@ -14,6 +14,25 @@ Features:
 - Offers flexible app name matching for finding the right application
 - Includes debug mode for troubleshooting
 
+API Requirements:
+- Access to the Jamf Pro Classic API through API Roles and Clients
+- API role with read access to the required endpoints
+- If using token authentication, access to the /api/v1/auth/token endpoint
+
+Required API Privileges in the Role:
+- Classic API: Read (required for this script)
+- Computers: Read
+- Computer Extension Attributes: Read 
+- Static Computer Groups: Read
+- Smart Computer Groups: Read
+- Users: Read
+- Computer Reports: Read
+
+For more information on setting up API access, see the README.md file.
+
+
+
+
 Author: Omri Kedem 
 Version: 1.0.30
 License: MIT
