@@ -20,7 +20,7 @@ API Requirements:
 - API role with read access to the required endpoints
 - Classic API: Read, Computers: Read, Computer Groups: Read
 
-Author: Your Name
+Author: Omri Kedem
 Version: 2.0.0
 License: MIT
 """
