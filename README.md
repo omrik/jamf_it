@@ -55,9 +55,6 @@ A Python script that retrieves application usage data from the Jamf Pro API and 
 ./jamf_app_usage.py -a "Adobe Photoshop.app" -d 60 -s "https://your-instance.jamfcloud.com" -u username -p password
 ```
 
-### Discovering Available Applications
-
-## Usage
 
 ### Listing Available Applications
 
