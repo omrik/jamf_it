@@ -1,89 +1,105 @@
-# Jamf Application Usage Reporter
+# Jamf Pro IT Tools
 
-A Python script that retrieves application usage data from the Jamf Pro API and generates comprehensive CSV reports showing the amount of minutes each computer has used a specific application.
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Python Version](https://img.shields.io/badge/python-3.6%2B-blue)](https://www.python.org/downloads/)
 
-## Features
+A collection of Python scripts for Jamf Pro administrators to analyze application usage and track software versions across managed devices. These tools help you make data-driven decisions about software deployment, licensing, and updates.
 
-- Retrieves application usage data for all computers or specific computer groups
-- Shows total minutes of usage per computer
-- Includes serial numbers, device names, and other relevant information
+## 📊 Scripts Included
+
+### 1. Application Usage Reporter
+
+The `jamf_app_usage.py` script analyzes how frequently applications are used across your Jamf-managed computers.
+
+**Key Features:**
+- Retrieves application usage data (minutes of usage) for all computers or specific groups
+- Reports which computers are using specific applications and for how long
 - Supports both username/password and token-based authentication
 - Auto-generates descriptive filenames for reports
-- Provides a discovery mode to list all applications found in usage data
-- Offers flexible app name matching
-- Includes debug mode for troubleshooting
+- Offers flexible app name matching for finding the right application
 
-## Requirements
+### 2. Application Inventory Tracker
+
+The `jamf_app_inventory.py` script provides a comprehensive inventory of installed applications and identifies outdated versions.
+
+**Key Features:**
+- Creates a one-line-per-app summary showing version distribution
+- Automatically determines the latest version of each application
+- Identifies computers with outdated software that needs updating
+- Works without requiring an external reference for latest versions
+- Generates clear reports for application auditing and update planning
+
+## 🖥️ Screenshots
+
+<details>
+<summary>Click to view screenshots</summary>
+
+*Coming soon*
+
+</details>
+
+## 🔧 Requirements
 
 - Python 3.6 or higher
 - Required Python packages: `requests`
 - A Jamf Pro instance with API access
 - For token authentication: a working `jamf_get_token.sh` script that outputs a valid API token
 
-## Installation
+## 🚀 Installation
 
-1. Clone this repository or download the script:
+1. Clone this repository:
    ```bash
-   git clone https://github.com/omrik/jamf-it.git
+   git clone https://github.com/omrik/jamf_it.git
+   cd jamf_it
    ```
 
 2. Install the required packages:
    ```bash
-   pip install requests
+   pip install -r requirements.txt
    ```
 
-3. Make the script executable:
+3. Make the scripts executable:
    ```bash
-   chmod +x jamf_app_usage.py
+   chmod +x jamf_app_usage.py jamf_app_inventory.py
    ```
 
-## API Authentication & Permissions
+4. (Optional) For token authentication, create a `jamf_get_token.sh` script using the provided example:
+   ```bash
+   cp jamf_get_token.sh.example jamf_get_token.sh
+   chmod +x jamf_get_token.sh
+   ```
+
+## 🔑 API Authentication
 
 ### Setting Up API Access in Jamf Pro
 
-To use this script, you'll need to set up API access in your Jamf Pro instance using API Roles and Clients:
-
-#### Creating API Roles and Clients
+To use these scripts, you'll need to set up API access in your Jamf Pro instance using API Roles and Clients:
 
 1. Log in to your Jamf Pro instance as an administrator
 2. Navigate to **Settings** > **System Settings** > **API Roles and Clients**
 3. First, create a role by clicking the "New Role" button
 4. Fill in the following details:
-   - **Display Name**: Choose a descriptive name (e.g., "Application Usage Reporter")
+   - **Display Name**: Choose a descriptive name (e.g., "Admin Tools Reporter")
    - **Privileges**: Assign the following minimum permissions:
-     - **Classic API**: ✓ Read (required for this script)
+     - **Classic API**: ✓ Read (required for these scripts)
      - **Computers**: ✓ Read
      - **Computer Extension Attributes**: ✓ Read 
      - **Static Computer Groups**: ✓ Read
      - **Smart Computer Groups**: ✓ Read
-     - **Users**: ✓ Read
-     - **Computer Reports**: ✓ Read
    - Click **Save** to create the role
 
 5. Next, create a client by clicking the "New Client" button
 6. Fill in the following details:
-   - **Display Name**: A descriptive name (e.g., "Application Usage Client")
+   - **Display Name**: A descriptive name (e.g., "Admin Tools Client")
    - **Client ID**: Auto-generated or specify your own
    - **Access Token Lifetime**: Set an appropriate duration (default is 30 minutes)
    - **Authorization Scopes**: Select the role you just created
 7. Click **Save** to create the client
 8. Note down your **Client ID** and **Client Secret** - you'll need these for authentication
 
-#### Authentication Methods
+### Secure Token Authentication
 
-This script supports two authentication methods:
-
-##### 1. Username/Password Authentication (Legacy)
-
-If your Jamf Pro instance still supports basic authentication with the Classic API, you can use the `-u` and `-p` parameters:
-
-```bash
-./jamf_app_usage.py -a "Chrome" -s "https://your-instance.jamfcloud.com" -u "username" -p "password"
-```
-
-##### 2. Token-Based Authentication (Recommended)
-
-For more secure token-based authentication, you can create a script (`jamf_get_token.sh`) that obtains a valid token using environment variables:
+For token-based authentication, create a script named `jamf_get_token.sh` that uses environment variables to securely retrieve a token:
 
 ```bash
 #!/bin/bash
@@ -103,160 +119,163 @@ TOKEN=$(curl -s -X POST "$JAMF_URL/api/v1/auth/token" \
 echo "$TOKEN"
 ```
 
-To use token authentication:
-
-1. Set your environment variables:
-   ```bash
-   export JAMF_URL="https://your-instance.jamfcloud.com"
-   export JAMF_CLIENT_ID="your-client-id"
-   export JAMF_CLIENT_SECRET="your-super-secret-key"
-   ```
-
-2. Make the script executable:
-   ```bash
-   chmod +x jamf_get_token.sh
-   ```
-
-3. Run the application usage script with the `-t` flag:
-   ```bash
-   ./jamf_app_usage.py -a "Chrome" -t
-   ```
-
-This approach keeps your credentials secure by never storing them in plaintext in the script.
-
-### Security Best Practices
-
-1. **Use Environment Variables**: Store sensitive credentials as environment variables instead of hardcoding them.
-2. **Least Privilege**: Create API clients with only the necessary permissions.
-3. **Rotate Client Secrets**: Regularly update your client secrets.
-4. **Limited Token Lifetime**: Set appropriate token lifetimes based on your usage patterns.
-5. **Audit API Usage**: Periodically review API activity in Jamf Pro logs.
-6. **Secure Storage**: Consider using a password manager or secret management service for storing credentials.
-
-### Troubleshooting Authentication Issues
-
-If you encounter authentication problems:
-
-1. **Check Environment Variables**: Ensure all required environment variables are set correctly.
-2. **Check Permissions**: Verify the API client has the appropriate privileges listed above.
-3. **API Access Enabled**: Ensure API access is enabled in your Jamf Pro instance.
-4. **Network Access**: Make sure your system can access the Jamf Pro API endpoints.
-5. **Token Expiration**: If using token authentication, ensure your token is not expired.
-6. **Legacy API Support**: If using username/password, confirm the Classic API still allows this authentication method in your Jamf Pro version.
-
-## Usage
-
-### Basic Usage
+To use token authentication, set your environment variables and use the `-t` flag with the scripts:
 
 ```bash
-# Search for a specific app usage across all computers
-./jamf_app_usage.py -a "Google Chrome.app" -s "https://your-instance.jamfcloud.com" -u username -p password
-
-# Filter by computer group
-./jamf_app_usage.py -a "Microsoft Word.app" -g "Finance Department" -s "https://your-instance.jamfcloud.com" -u username -p password
-
-# Specify a custom output filename
-./jamf_app_usage.py -a "Slack.app" -o custom_report.csv -s "https://your-instance.jamfcloud.com" -u username -p password
-
-# Look back at 60 days of usage data instead of the default 30
-./jamf_app_usage.py -a "Adobe Photoshop.app" -d 60 -s "https://your-instance.jamfcloud.com" -u username -p password
+export JAMF_URL="https://your-instance.jamfcloud.com"
+export JAMF_CLIENT_ID="your-client-id"
+export JAMF_CLIENT_SECRET="your-super-secret-key"
 ```
 
+## 📋 Usage
 
-### Listing Available Applications
-
-To discover what applications are available in your Jamf usage data:
-
-```bash
-# List all applications with their usage minutes
-./jamf_app_usage.py --list-apps -s "https://your-instance.jamfcloud.com" -u username -p password
-```
-
-This shows all applications found in the usage data from the first 5 computers, sorted by total minutes used.
-
-### Analyzing Specific Application Usage
-
-Once you know which application you want to analyze:
+### Application Usage Reporter
 
 ```bash
-# Basic usage - search for a specific app
+# Basic usage - shows usage for a specific application
 ./jamf_app_usage.py -a "Microsoft Word.app" -s "https://your-instance.jamfcloud.com" -u username -p password
 
-# Filter by computer group
-./jamf_app_usage.py -a "Google Chrome.app" -g "Marketing" -s "https://your-instance.jamfcloud.com" -u username -p password
+# Find all used applications first
+./jamf_app_usage.py --list-apps -s "https://your-instance.jamfcloud.com" -u username -p password
 
-# Look back at more days of data
-./jamf_app_usage.py -a "Slack.app" -d 90 -s "https://your-instance.jamfcloud.com" -u username -p password
+# Token authentication and filter by group
+./jamf_app_usage.py -a "Slack.app" -t -g "Marketing"
 
-# Specify a custom output filename
-./jamf_app_usage.py -a "Safari.app" -o safari_report.csv -s "https://your-instance.jamfcloud.com" -u username -p password
+# Debug mode for troubleshooting
+./jamf_app_usage.py -a "Adobe Photoshop.app" -t --debug
 ```
 
-### Token Authentication
-
-If you have a script that retrieves API tokens:
+### Application Inventory Tracker
 
 ```bash
-# Use token authentication instead of username/password
-./jamf_app_usage.py -a "Adobe Photoshop.app" -t -s "https://your-instance.jamfcloud.com"
+# Basic usage - lists all applications and finds outdated versions
+./jamf_app_inventory.py -s "https://your-instance.jamfcloud.com" -u username -p password
+
+# Focus on applications with at least 3 different versions
+./jamf_app_inventory.py -t -g "Finance" --min-version-count 3
+
+# Custom output file naming
+./jamf_app_inventory.py -t -g "Engineering" -o "eng_inventory"
 ```
 
-This expects a script named `jamf_get_token.sh` in the same directory that outputs a valid API token.
+## 📁 Output Examples
 
-### Troubleshooting
+### Application Usage Report
 
-If you're having issues, use the debug mode:
+The usage report shows which computers are using specific applications and for how long:
+
+```
+Computer ID,Computer Name,Serial Number,Application,Total Minutes,Days Used,Average Minutes Per Day,Date Range
+42,MARKETING-01,C02XYZ123ABC,Microsoft Word.app,437,12,36.42,2023-05-01 to 2023-06-01
+67,FINANCE-03,C02XYZ456DEF,Microsoft Word.app,1205,18,66.94,2023-05-01 to 2023-06-01
+```
+
+### Applications Summary Report
+
+The inventory summary shows one line per application with version distribution:
+
+```
+Application,Version Count,Newest Version,Oldest Version,Total Installations,Computers with Latest Version,Computers with Outdated Versions
+Adobe Acrobat Reader,3,23.006.20320,21.001.20145,45,12,33
+Google Chrome,2,115.0.5790.170,114.0.5735.198,67,54,13
+Microsoft Word,4,16.74.0,16.62.0,50,20,30
+```
+
+### Outdated Computers Report
+
+The outdated computers report identifies which computers need updates:
+
+```
+Computer Name,Serial Number,OS Version,Last Inventory Update,Outdated Apps Count,Outdated Applications
+FINANCE-MBP-01,C02XYZ123ABC,13.2.1,2023-06-01,2,Adobe Acrobat Reader (installed 21.001.20145 < latest 23.006.20320); Microsoft Word (installed 16.62.0 < latest 16.74.0)
+IT-MBP-03,C02XYZ456DEF,13.3.1,2023-06-05,1,Google Chrome (installed 114.0.5735.198 < latest 115.0.5790.170)
+```
+
+## 📊 Example Workflows
+
+### Software License Optimization
+
+1. Run the usage reporter to identify rarely-used software:
+   ```bash
+   ./jamf_app_usage.py -a "ExpensiveSoftware.app" -t
+   ```
+
+2. Analyze the results to find computers where the software is rarely used
+3. Consider reclaiming licenses or implementing a license-sharing approach
+
+### Update Compliance Reporting
+
+1. Generate an inventory report to find outdated applications:
+   ```bash
+   ./jamf_app_inventory.py -t -g "Marketing"
+   ```
+
+2. Identify computers with outdated software that needs patching
+3. Create a targeted Smart Group in Jamf Pro for deploying updates
+
+### Batch Reporting
+
+Use the example scripts in the `examples` directory to generate reports for multiple applications or groups at once:
 
 ```bash
-# Enable debug mode for verbose output
-./jamf_app_usage.py -a "Microsoft Excel.app" --debug -s "https://your-instance.jamfcloud.com" -u username -p password
-
-# Skip SSL certificate verification (not recommended for production)
-./jamf_app_usage.py -a "Keynote.app" --insecure -s "https://your-instance.jamfcloud.com" -u username -p password
+cd examples
+./batch_app_inventory.sh
 ```
 
-## Output
+## 📂 Project Structure
 
-The script generates a CSV file with the following information for each computer:
-- Computer ID
-- Computer Name
-- Serial Number
-- Application
-- Total Minutes (total usage in minutes)
-- Days Used (number of days the application was used)
-- Average Minutes Per Day
-- Date Range
+```
+jamf_it/
+├── jamf_app_usage.py            # Application usage reporter script
+├── jamf_app_inventory.py        # Application inventory tracker script
+├── README.md                    # This documentation
+├── requirements.txt             # Python package dependencies
+├── LICENSE                      # MIT license
+├── .gitignore                   # Git ignore configuration
+├── jamf_get_token.sh.example    # Template for token authentication
+├── examples/                    # Example batch scripts
+│   ├── batch_app_inventory.sh   # Run inventory for multiple groups
+│   └── generate_usage_report.sh # Generate usage reports for multiple apps
+└── reports/                     # Generated reports (gitignored)
+```
 
-### Auto-generated Filenames
+## 🛠️ Troubleshooting
 
-If you don't specify an output filename with `-o`, the script will create a descriptive filename based on:
-- The application name
-- The computer group name (if specified)
-- The number of days searched
-- The current date
+If you encounter issues:
 
-Example: `Microsoft_Word_Finance_Department_30days_2023-05-11.csv`
+1. **API Authentication Problems**
+   - Verify your API credentials have the correct permissions
+   - Check that your Jamf Pro instance supports the Classic API
+   - Try using the `--debug` flag to see detailed API responses
 
-## How It Works
+2. **Version Comparison Issues**
+   - If applications have unusual version formats, check the debug output
+   - Look for error messages during the version sorting process
 
-This script uses the Jamf Pro Classic API to:
-1. Fetch a list of computers (all or filtered by group)
-2. Retrieve serial numbers for each computer
-3. Query the `/computerapplicationusage/serialnumber` endpoint for each computer
-4. Parse the XML response to extract application usage data
-5. Filter for the specified application (with flexible name matching)
-6. Calculate total and average usage minutes
-7. Output the results to a CSV file
+3. **Missing Data**
+   - Ensure computers have recent inventory updates in Jamf Pro
+   - Check that application usage tracking is enabled in your Jamf Pro instance
 
-## License
+## 📄 License
 
-[MIT License](LICENSE)
+[MIT](https://github.com/omrik/jamf_it/blob/main/LICENSE)
 
-## Contributing
+## 👥 Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+Contributions are welcome! Please feel free to submit a pull request or open issues on the [GitHub repository](https://github.com/omrik/jamf_it/issues).
 
-## Acknowledgments
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add some amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
 
-- Thanks to the Jamf community for their valuable insights into the API
-- Special thanks to https://github.com/jp-cpe/check-application-usage for the initial idea
+## 📱 Related Projects
+
+- [Jamf Pro API Python Wrapper](https://github.com/bweber/jamf-pro-api-python)
+- [python-jss](https://github.com/jssimporter/python-jss)
+- [jamJAR](https://github.com/dataJAR/jamJAR)
+
+---
+
+Made with ❤️ by [Omri](https://github.com/omrik)
