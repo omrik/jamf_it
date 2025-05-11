@@ -57,31 +57,59 @@ A Python script that retrieves application usage data from the Jamf Pro API and 
 
 ### Discovering Available Applications
 
-If you're not sure what application names are available in your Jamf data, use the `--list-apps` option:
+## Usage
+
+### Listing Available Applications
+
+To discover what applications are available in your Jamf usage data:
 
 ```bash
+# List all applications with their usage minutes
 ./jamf_app_usage.py --list-apps -s "https://your-instance.jamfcloud.com" -u username -p password
 ```
 
-This will show all applications found in the usage data from the first 5 computers, sorted by total minutes used.
+This shows all applications found in the usage data from the first 5 computers, sorted by total minutes used.
 
-### Troubleshooting
+### Analyzing Specific Application Usage
 
-If you're having issues, use the `--debug` flag for more verbose output:
+Once you know which application you want to analyze:
 
 ```bash
-./jamf_app_usage.py -a "Microsoft Word.app" --debug -s "https://your-instance.jamfcloud.com" -u username -p password
+# Basic usage - search for a specific app
+./jamf_app_usage.py -a "Microsoft Word.app" -s "https://your-instance.jamfcloud.com" -u username -p password
+
+# Filter by computer group
+./jamf_app_usage.py -a "Google Chrome.app" -g "Marketing" -s "https://your-instance.jamfcloud.com" -u username -p password
+
+# Look back at more days of data
+./jamf_app_usage.py -a "Slack.app" -d 90 -s "https://your-instance.jamfcloud.com" -u username -p password
+
+# Specify a custom output filename
+./jamf_app_usage.py -a "Safari.app" -o safari_report.csv -s "https://your-instance.jamfcloud.com" -u username -p password
 ```
 
 ### Token Authentication
 
-If you have a script that can retrieve API tokens, use the `-t` flag:
+If you have a script that retrieves API tokens:
 
 ```bash
-./jamf_app_usage.py -a "Safari.app" -t -s "https://your-instance.jamfcloud.com"
+# Use token authentication instead of username/password
+./jamf_app_usage.py -a "Adobe Photoshop.app" -t -s "https://your-instance.jamfcloud.com"
 ```
 
 This expects a script named `jamf_get_token.sh` in the same directory that outputs a valid API token.
+
+### Troubleshooting
+
+If you're having issues, use the debug mode:
+
+```bash
+# Enable debug mode for verbose output
+./jamf_app_usage.py -a "Microsoft Excel.app" --debug -s "https://your-instance.jamfcloud.com" -u username -p password
+
+# Skip SSL certificate verification (not recommended for production)
+./jamf_app_usage.py -a "Keynote.app" --insecure -s "https://your-instance.jamfcloud.com" -u username -p password
+```
 
 ## Output
 
