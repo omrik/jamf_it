@@ -5,10 +5,16 @@
 # By Omri Kedem 08/2024
 # first export your client secret: export gen_k="my-secret-xxxxx"
 # then change your server URL and client_id
+# 
+# Check if required environment variables are set
+if [ -z "$JAMF_URL" ] || [ -z "$JAMF_CLIENT_ID" ] || [ -z "$JAMF_CLIENT_SECRET" ]; then
+    echo "Error: Missing environment variables" >&2
+    exit 1
+fi
 
-url="https://your-server.jamfcloud.com"
-client_id="xxx-xxx-xxxx-xxxx"
-client_secret=$gen_k
+url=$JAMF_URL
+client_id=$JAMF_CLIENT_ID
+client_secret=$JAMF_CLIENT_SECRET
 
 getAccessToken() {
         response=$(curl --silent --location --request POST "${url}/api/oauth/token" \
