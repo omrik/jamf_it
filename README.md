@@ -7,7 +7,7 @@ A collection of Python scripts for Jamf Pro administrators to analyze applicatio
 
 ## 📊 Scripts Included
 
-### 1. Application Usage Reporter
+### 1. [Application Usage Reporter](https://github.com/omrik/jamf_it/jamf_app_inventory/)
 
 The `jamf_app_usage.py` script analyzes how frequently applications are used across your Jamf-managed computers.
 
@@ -18,7 +18,7 @@ The `jamf_app_usage.py` script analyzes how frequently applications are used acr
 - Auto-generates descriptive filenames for reports
 - Offers flexible app name matching for finding the right application
 
-### 2. Application Inventory Tracker
+### 2. [Application Inventory Tracker](https://github.com/omrik/jamf_it/jamf_app_inventory/)
 
 The `jamf_app_inventory.py` script provides a comprehensive inventory of installed applications and identifies outdated versions.
 
@@ -29,7 +29,7 @@ The `jamf_app_inventory.py` script provides a comprehensive inventory of install
 - Works without requiring an external reference for latest versions
 - Generates clear reports for application auditing and update planning
 
-### 3.  Apple Business Manager to Jamf Pro Device Sync
+### 3.  [Apple Business Manager to Jamf Pro Device Sync](https://github.com/omrik/jamf_it/jamf_abm_sync/)
 
 A Python script that synchronizes device purchase information from Apple Business Manager (ABM) to Jamf Pro, automatically updating purchasing details for all managed devices.
 
