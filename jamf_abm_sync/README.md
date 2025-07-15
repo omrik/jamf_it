@@ -64,7 +64,20 @@ curl -s -u "$JAMF_USER:$JAMF_PASS" \
   jq -r '.token'
 ```
 
-### 3. Make Scripts Executable
+### 4. Create Vendor Mapping (Optional)
+
+Create a `vendor_mapping.json` file to map vendor IDs to readable names:
+
+```json
+{
+  "1210895": "Apple",
+  "64AFCB0": "AMIRIM",
+  "37E8FF0": "WEDIGGIT LTD",
+  "4C90610": "ESPIRCOM SYSTEMS LTD"
+}
+```
+
+This will display vendor names like "AMIRIM" instead of cryptic IDs like "64AFCB0" in Jamf Pro. If the file is not found, vendor IDs will be used as-is.
 
 ```bash
 chmod +x get_abm_token.sh
@@ -81,9 +94,11 @@ The script maps the following fields from ABM to Jamf Pro:
 | `addedToOrgDateTime` | `poDate` | Purchase order date |
 | `addedToOrgDateTime + 3 years` | `warrantyDate` | Calculated warranty expiration |
 | `orderNumber` | `poNumber` | Purchase order number |
-| `purchaseSourceId` | `vendor` | Vendor identifier |
+| `purchaseSourceId` | `vendor` | Vendor name (mapped via vendor_mapping.json) |
 | N/A | `purchased` | Always set to `true` |
 | N/A | `lifeExpectancy` | Always set to `3` years |
+
+**Note**: If `vendor_mapping.json` exists, vendor IDs will be converted to readable names (e.g., "64AFCB0" → "AMIRIM"). Otherwise, the vendor ID will be used directly.
 
 ## 🚦 Usage
 
@@ -93,34 +108,42 @@ The script maps the following fields from ABM to Jamf Pro:
 python abm_jamf_sync.py
 ```
 
-### Testing with Limited Devices
+### Command Line Options
 
-For testing, you can modify the sync loop to process only a few devices:
+The script supports several command-line options for testing and debugging:
 
-```python
-# In the sync_devices function, add this after the for loop:
-for i, device in enumerate(abm_devices):
-    if i >= 2:  # Stop after 2 devices for testing
-        logger.info("Test mode: Stopping after 2 devices")
-        break
-    # ... rest of loop continues
+```bash
+# Test mode - process only N devices
+python abm_jamf_sync.py --test 2     # Process only 2 devices
+python abm_jamf_sync.py --test 5     # Process only 5 devices
+python abm_jamf_sync.py --test 10    # Process only 10 devices
+
+# Dry run mode - show what would be updated without making changes
+python abm_jamf_sync.py --dry-run
+
+# Combined options
+python abm_jamf_sync.py --test 2 --dry-run
+
+# Help
+python abm_jamf_sync.py --help
 ```
 
-### Dry Run Mode
+### Test Mode Output
 
-To see what would be updated without making changes:
+When using `--test N`, the script will:
+- Process only the first N devices from ABM
+- Show progress as "Processing device X/N"
+- Display a clear indication that it's in test mode
+- Report how many devices were processed vs. total available
 
-```python
-# Add this flag at the top of sync_devices function:
-DRY_RUN = True  # Set to False for actual updates
-
-# Then in the update section:
-if DRY_RUN:
-    logger.info(f"DRY RUN: Would update computer ID {computer_id} with: {purchase_data}")
-    updated_successfully += 1
-else:
-    if update_jamf_computer(computer_id, purchase_data, jamf_token, jamf_server_url):
-        updated_successfully += 1
+Example output:
+```
+2025-07-15 12:19:31,773 - INFO - TEST MODE: Processing only 2 devices
+2025-07-15 12:19:31,773 - INFO - Processing device 1/2: C02G2034ML88
+2025-07-15 12:19:34,416 - INFO - Processing device 2/2: C02H4567ML99
+2025-07-15 12:19:35,500 - INFO - TEST MODE: Stopping after 2 devices
+=== SYNC COMPLETED ===
+TEST MODE: Processed 2 of 100 devices
 ```
 
 ## 📊 Output
@@ -128,8 +151,10 @@ else:
 The script provides detailed logging and a final summary:
 
 ```
+2025-07-15 12:19:31,773 - INFO - Starting device sync process...
+2025-07-15 12:19:31,773 - INFO - Loaded 4 vendor mappings from vendor_mapping.json
 2025-07-15 12:19:31,773 - INFO - Processing device: C02G2034ML88
-2025-07-15 12:19:34,416 - INFO - Updating computer ID 70 with purchase data: {'purchased': True, 'lifeExpectancy': 3, 'warrantyDate': '2024-11-24', 'vendor': '64AFCB0', 'poDate': '2021-11-25', 'poNumber': '411469852-49285488'}
+2025-07-15 12:19:34,416 - INFO - Updating computer ID 70 with purchase data: {'purchased': True, 'lifeExpectancy': 3, 'warrantyDate': '2024-11-24', 'vendor': 'AMIRIM', 'poDate': '2021-11-25', 'poNumber': '411469852-49285488'}
 2025-07-15 12:19:34,984 - INFO - Successfully updated computer ID 70
 
 === SYNC COMPLETED ===
@@ -138,6 +163,18 @@ Found in Jamf Pro: 95
 Updated successfully: 95
 Failed updates: 0
 Not found in Jamf Pro: 5
+```
+
+### Test Mode Output
+
+When using `--test N`, additional information is shown:
+```
+2025-07-15 12:19:31,773 - INFO - TEST MODE: Processing only 2 devices
+2025-07-15 12:19:31,773 - INFO - Processing device 1/2: C02G2034ML88
+2025-07-15 12:19:34,416 - INFO - Processing device 2/2: C02H4567ML99
+2025-07-15 12:19:35,500 - INFO - TEST MODE: Stopping after 2 devices
+=== SYNC COMPLETED ===
+TEST MODE: Processed 2 of 100 devices
 ```
 
 ## 🔧 API Requirements

@@ -8,6 +8,8 @@ import requests
 import json
 import logging
 import subprocess
+import os
+import argparse
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 
@@ -123,6 +125,107 @@ def get_devices_from_abm(abm_token: str) -> List[DeviceInfo]:
     logger.info(f"Retrieved {len(devices)} devices from ABM")
     return devices
 
+def load_vendor_mapping(mapping_file: str = "vendor_mapping.json") -> Dict[str, str]:
+    """
+    Load vendor ID to name mapping from external JSON file
+    
+    Args:
+        mapping_file: Path to the vendor mapping JSON file
+        
+    Returns:
+        Dictionary mapping vendor IDs to vendor names
+    """
+    try:
+        if not os.path.exists(mapping_file):
+            logger.warning(f"Vendor mapping file {mapping_file} not found. Using vendor IDs as names.")
+            return {}
+        
+        with open(mapping_file, 'r') as f:
+            mapping = json.load(f)
+        
+        logger.info(f"Loaded {len(mapping)} vendor mappings from {mapping_file}")
+        return mapping
+        
+    except Exception as e:
+        logger.error(f"Error loading vendor mapping file {mapping_file}: {e}")
+        logger.warning("Using vendor IDs as names.")
+        return {}
+
+def get_vendor_name(vendor_id: str, vendor_mapping: Dict[str, str]) -> str:
+    """
+    Get vendor name from vendor ID using the mapping
+    
+    Args:
+        vendor_id: Vendor ID from ABM
+        vendor_mapping: Dictionary mapping vendor IDs to names
+        
+    Returns:
+        Vendor name if found in mapping, otherwise returns the vendor ID
+    """
+    vendor_name = vendor_mapping.get(vendor_id, vendor_id)
+    
+    if vendor_name != vendor_id:
+        logger.debug(f"Mapped vendor ID {vendor_id} to {vendor_name}")
+    else:
+        logger.debug(f"No mapping found for vendor ID {vendor_id}, using ID as name")
+    
+    return vendor_name
+    """
+    Fetch all devices from Apple Business Manager
+    
+    Args:
+        abm_token: ABM API token
+        
+    Returns:
+        List of DeviceInfo objects
+    """
+    logger.info("Fetching devices from Apple Business Manager...")
+    
+    devices = []
+    base_url = "https://api-business.apple.com/v1"
+    headers = {
+        'Authorization': f'Bearer {abm_token}',
+        'Content-Type': 'application/json'
+    }
+    
+    cursor = None
+    while True:
+        # Build API request
+        url = f"{base_url}/orgDevices"
+        params = {"limit": 100}
+        if cursor:
+            params["cursor"] = cursor
+        
+        # Make request
+        response = requests.get(url, headers=headers, params=params)
+        response.raise_for_status()
+        data = response.json()
+        
+        # Process devices - Apple Business Manager uses 'data' array
+        device_list = data.get('data', [])
+        logger.info(f"Found {len(device_list)} devices in this batch")
+        
+        for device_data in device_list:
+            # Extract attributes from the nested structure
+            attributes = device_data.get('attributes', {})
+            
+            device = DeviceInfo(
+                serial_number=attributes.get('serialNumber', ''),
+                added_to_org_date=attributes.get('addedToOrgDateTime', ''),
+                order_number=attributes.get('orderNumber', ''),
+                purchase_source_type=attributes.get('purchaseSourceType', ''),
+                purchase_source_id=attributes.get('purchaseSourceId', '')
+            )
+            devices.append(device)
+        
+        # Check for more pages
+        cursor = data.get('cursor')
+        if not cursor:
+            break
+    
+    logger.info(f"Retrieved {len(devices)} devices from ABM")
+    return devices
+
 def find_jamf_computer(serial_number: str, jamf_token: str, jamf_server_url: str) -> Optional[Dict]:
     """
     Find a computer in Jamf Pro by serial number using Classic API
@@ -168,12 +271,13 @@ def calculate_warranty_date(added_to_org_date: str) -> str:
     # Return in YYYY-MM-DD format
     return warranty_date.strftime('%Y-%m-%d')
 
-def create_jamf_purchase_data(device: DeviceInfo) -> Dict:
+def create_jamf_purchase_data(device: DeviceInfo, vendor_mapping: Dict[str, str]) -> Dict:
     """
     Create Jamf Pro purchasing data from ABM device information
     
     Args:
         device: DeviceInfo object from ABM
+        vendor_mapping: Dictionary mapping vendor IDs to names
         
     Returns:
         Dictionary formatted for Jamf Pro purchasing update
@@ -185,12 +289,15 @@ def create_jamf_purchase_data(device: DeviceInfo) -> Dict:
     purchase_date = datetime.fromisoformat(device.added_to_org_date.replace('Z', '+00:00'))
     po_date = purchase_date.strftime('%Y-%m-%d')
     
+    # Get vendor name from mapping
+    vendor_name = get_vendor_name(device.purchase_source_id, vendor_mapping)
+    
     # Build purchase data
     purchase_data = {
         "purchased": True,
         "lifeExpectancy": 3,
         "warrantyDate": warranty_date,
-        "vendor": device.purchase_source_id,
+        "vendor": vendor_name,
         "poDate": po_date,
         "poNumber": device.order_number
     }
@@ -239,7 +346,7 @@ def update_jamf_computer(computer_id: int, purchase_data: Dict, jamf_token: str,
         logger.error(f"Response: {response.text}")
         return False
 
-def sync_devices(abm_token: str, jamf_token: str, jamf_server_url: str):
+def sync_devices(abm_token: str, jamf_token: str, jamf_server_url: str, test_limit: Optional[int] = None):
     """
     Main sync function - orchestrates the entire process
     
@@ -247,8 +354,15 @@ def sync_devices(abm_token: str, jamf_token: str, jamf_server_url: str):
         abm_token: Apple Business Manager API token
         jamf_token: Jamf Pro API token
         jamf_server_url: Jamf Pro server URL
+        test_limit: Optional limit on number of devices to process for testing
     """
     logger.info("Starting device sync process...")
+    
+    if test_limit:
+        logger.info(f"TEST MODE: Processing only {test_limit} devices")
+    
+    # Load vendor mapping
+    vendor_mapping = load_vendor_mapping()
     
     # Counters for reporting
     total_devices = 0
@@ -261,9 +375,14 @@ def sync_devices(abm_token: str, jamf_token: str, jamf_server_url: str):
     abm_devices = get_devices_from_abm(abm_token)
     total_devices = len(abm_devices)
     
-    # Step 2: Process each device
-    for device in abm_devices:
-        logger.info(f"Processing device: {device.serial_number}")
+    # Step 2: Process each device (with optional limit for testing)
+    for i, device in enumerate(abm_devices):
+        # Check test limit
+        if test_limit and i >= test_limit:
+            logger.info(f"TEST MODE: Stopping after {test_limit} devices")
+            break
+            
+        logger.info(f"Processing device {i+1}/{total_devices if not test_limit else test_limit}: {device.serial_number}")
         
         # Step 3: Find device in Jamf Pro
         jamf_computer = find_jamf_computer(device.serial_number, jamf_token, jamf_server_url)
@@ -278,8 +397,8 @@ def sync_devices(abm_token: str, jamf_token: str, jamf_server_url: str):
         # Step 4: Get computer ID
         computer_id = jamf_computer['computer']['general']['id']
         
-        # Step 5: Create purchase data
-        purchase_data = create_jamf_purchase_data(device)
+        # Step 5: Create purchase data with vendor mapping
+        purchase_data = create_jamf_purchase_data(device, vendor_mapping)
         
         logger.info(f"Updating computer ID {computer_id} with purchase data: {purchase_data}")
         
@@ -291,6 +410,8 @@ def sync_devices(abm_token: str, jamf_token: str, jamf_server_url: str):
     
     # Step 7: Report results
     logger.info("=== SYNC COMPLETED ===")
+    if test_limit:
+        logger.info(f"TEST MODE: Processed {min(test_limit, total_devices)} of {total_devices} devices")
     logger.info(f"Total ABM devices: {total_devices}")
     logger.info(f"Found in Jamf Pro: {found_in_jamf}")
     logger.info(f"Updated successfully: {updated_successfully}")
@@ -301,6 +422,12 @@ def main():
     """
     Main function - configure your shell scripts and server URL here
     """
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='Sync device purchase information from Apple Business Manager to Jamf Pro')
+    parser.add_argument('--test', type=int, metavar='N', help='Test mode: only process N devices (e.g., --test 2)')
+    parser.add_argument('--dry-run', action='store_true', help='Dry run mode: show what would be updated without making changes')
+    args = parser.parse_args()
+    
     # Configuration
     JAMF_SERVER_URL = "https://your-jamf-server.com"
     
@@ -309,7 +436,13 @@ def main():
         ABM_TOKEN = get_token_from_script("get_abm_token.sh", "Apple Business Manager")
         JAMF_TOKEN = get_token_from_script("get_jamf_token.sh", "Jamf Pro")
         
-        sync_devices(ABM_TOKEN, JAMF_TOKEN, JAMF_SERVER_URL)
+        # Handle dry run mode
+        if args.dry_run:
+            logger.info("DRY RUN MODE: No actual updates will be made")
+            # You can implement dry run logic here if needed
+        
+        sync_devices(ABM_TOKEN, JAMF_TOKEN, JAMF_SERVER_URL, test_limit=args.test)
+        
     except Exception as e:
         logger.error(f"Sync failed: {e}")
         raise
