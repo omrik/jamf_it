@@ -23,8 +23,8 @@ A Python script that synchronizes device purchase information from Apple Busines
 
 1. **Clone the repository**:
    ```bash
-   git clone https://github.com/yourusername/abm-jamf-sync.git
-   cd abm-jamf-sync
+   git clone https://github.com/omrik/jamf_it.git
+   cd jamf_it
    ```
 
 2. **Install dependencies**:
