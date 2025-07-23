@@ -1,15 +1,21 @@
-# Apple Business Manager to Jamf Pro Device Sync
+# Apple Business Manager to Jamf Pro Integration Suite
 
-A Python script that synchronizes device purchase information from Apple Business Manager (ABM) to Jamf Pro, automatically updating purchasing details for all managed devices.
+A comprehensive Python toolkit for synchronizing and comparing device purchase information between Apple Business Manager (ABM) and Jamf Pro. This suite provides both sync capabilities and read-only comparison tools for managing your Mac fleet.
 
 ## 🚀 Features
 
+### Sync Script (`abm_jamf_sync.py`)
 - **Automated Sync**: Fetches all devices from Apple Business Manager and updates corresponding records in Jamf Pro
 - **Comprehensive Data Mapping**: Maps ABM purchase data to Jamf Pro purchasing fields
-- **Robust Error Handling**: Handles API errors gracefully with detailed logging
-- **Secure Token Management**: Uses external shell scripts for secure token retrieval
-- **Modern API Support**: Uses the latest ABM API v1 and Jamf Pro API v1 endpoints
-- **Detailed Reporting**: Provides comprehensive sync statistics and logging
+- **Test & Dry Run Modes**: Safe testing with limited devices and preview mode
+- **Vendor Name Mapping**: Converts vendor IDs to readable company names
+
+### Comparison Script (`abm_jamf_compare.py`)
+- **Read-Only Analysis**: Compare purchase information without making changes
+- **Missing Device Detection**: Identify devices in ABM but not in Jamf Pro
+- **Difference Reporting**: Show mismatched purchase information between systems
+- **Multiple Output Formats**: Clean tabulated display and CSV export with essential fields
+- **Professional Reports**: Executive-ready summaries and detailed analysis
 
 ## 📋 Prerequisites
 
@@ -24,7 +30,7 @@ A Python script that synchronizes device purchase information from Apple Busines
 1. **Clone the repository**:
    ```bash
    git clone https://github.com/omrik/jamf_it.git
-   cd jamf_it
+   cd jamf_it/jamf_abm_sync
    ```
 
 2. **Install dependencies**:
@@ -32,7 +38,7 @@ A Python script that synchronizes device purchase information from Apple Busines
    pip install requests
    ```
 
-3. **Set up token scripts** (see Configuration section below)
+3. **Set up token scripts and configuration** (see Configuration section below)
 
 ## ⚙️ Configuration
 
@@ -70,14 +76,14 @@ Create a `vendor_mapping.json` file to map vendor IDs to readable names:
 
 ```json
 {
-  "1210895": "Apple",
-  "64AFCB0": "AMIRIM",
-  "37E8FF0": "WEDIGGIT LTD",
-  "4C90610": "ESPIRCOM SYSTEMS LTD"
+  "2341567": "Apple",
+  "A7B9C2D": "TechSource Solutions",
+  "F5E4A8B": "Global Systems Ltd",
+  "X9Y2Z5K": "Premier IT Distributors"
 }
 ```
 
-This will display vendor names like "AMIRIM" instead of cryptic IDs like "64AFCB0" in Jamf Pro. If the file is not found, vendor IDs will be used as-is.
+This will display vendor names like "TechSource Solutions" instead of cryptic IDs like "A7B9C2D" in Jamf Pro. If the file is not found, vendor IDs will be used as-is.
 
 ```bash
 chmod +x get_abm_token.sh
@@ -98,20 +104,18 @@ The script maps the following fields from ABM to Jamf Pro:
 | N/A | `purchased` | Always set to `true` |
 | N/A | `lifeExpectancy` | Always set to `3` years |
 
-**Note**: If `vendor_mapping.json` exists, vendor IDs will be converted to readable names (e.g., "64AFCB0" → "AMIRIM"). Otherwise, the vendor ID will be used directly.
+**Note**: If `vendor_mapping.json` exists, vendor IDs will be converted to readable names (e.g., "A7B9C2D" → "TechSource Solutions"). Otherwise, the vendor ID will be used directly.
 
 ## 🚦 Usage
 
-### Basic Usage
+### Sync Script (`abm_jamf_sync.py`)
 
+**Basic sync - updates all devices:**
 ```bash
 python abm_jamf_sync.py
 ```
 
-### Command Line Options
-
-The script supports several command-line options for testing and debugging:
-
+**Test & Debug Options:**
 ```bash
 # Test mode - process only N devices
 python abm_jamf_sync.py --test 2     # Process only 2 devices
@@ -121,60 +125,124 @@ python abm_jamf_sync.py --test 10    # Process only 10 devices
 # Dry run mode - show what would be updated without making changes
 python abm_jamf_sync.py --dry-run
 
-# Combined options
+# Combined options - test with preview
 python abm_jamf_sync.py --test 2 --dry-run
 
 # Help
 python abm_jamf_sync.py --help
 ```
 
-### Test Mode Output
+### Comparison Script (`abm_jamf_compare.py`)
 
-When using `--test N`, the script will:
-- Process only the first N devices from ABM
-- Show progress as "Processing device X/N"
-- Display a clear indication that it's in test mode
-- Report how many devices were processed vs. total available
+**Analysis Options:**
+```bash
+# Show purchase information differences (default)
+python abm_jamf_compare.py
+python abm_jamf_compare.py --diff
 
-Example output:
+# Show devices in ABM but not in Jamf Pro
+python abm_jamf_compare.py --missing
+
+# Show both differences and missing devices
+python abm_jamf_compare.py --all
 ```
-2025-07-15 12:19:31,773 - INFO - TEST MODE: Processing only 2 devices
-2025-07-15 12:19:31,773 - INFO - Processing device 1/2: C02G2034ML88
-2025-07-15 12:19:34,416 - INFO - Processing device 2/2: C02H4567ML99
-2025-07-15 12:19:35,500 - INFO - TEST MODE: Stopping after 2 devices
+
+**Export Options:**
+```bash
+# Export differences to CSV for spreadsheet analysis
+python abm_jamf_compare.py --diff --output csv
+
+# Export missing devices to CSV
+python abm_jamf_compare.py --missing --output csv
+
+# Export everything to CSV
+python abm_jamf_compare.py --all --output csv
+```
+
+### Recommended Workflow
+
+1. **First, analyze the current state:**
+   ```bash
+   python abm_jamf_compare.py --all --output csv
+   ```
+
+2. **Test sync on a few devices:**
+   ```bash
+   python abm_jamf_sync.py --test 5 --dry-run
+   ```
+
+3. **Run actual sync for testing:**
+   ```bash
+   python abm_jamf_sync.py --test 5
+   ```
+
+4. **Full sync when ready:**
+   ```bash
+   python abm_jamf_sync.py
+   ```
+
+## 📊 Output Examples
+
+### Sync Script Output
+
+**Test mode with dry run:**
+```
+2025-07-23 15:25:02,324 - INFO - TEST MODE: Processing only 2 devices
+2025-07-23 15:25:02,324 - INFO - DRY RUN MODE: No actual updates will be made
+2025-07-23 15:25:02,324 - INFO - Processing device 1/2: MXN8J2K9LM4P
+2025-07-23 15:25:02,324 - INFO - DRY RUN: Would update computer ID 145
+2025-07-23 15:25:02,324 - INFO - DRY RUN: Purchase data: {
+  "purchased": true,
+  "lifeExpectancy": 3,
+  "warrantyDate": "2024-11-24",
+  "vendor": "TechSource Solutions",
+  "poDate": "2021-11-25",
+  "poNumber": "PO-2021-78456"
+}
+
 === SYNC COMPLETED ===
-TEST MODE: Processed 2 of 100 devices
+TEST MODE: Processed 2 of 187 devices
+DRY RUN MODE: No actual changes were made
 ```
 
-## 📊 Output
+### Comparison Script Output
 
-The script provides detailed logging and a final summary:
-
+**Purchase differences (tabulated format):**
 ```
-2025-07-15 12:19:31,773 - INFO - Starting device sync process...
-2025-07-15 12:19:31,773 - INFO - Loaded 4 vendor mappings from vendor_mapping.json
-2025-07-15 12:19:31,773 - INFO - Processing device: C02G2034ML88
-2025-07-15 12:19:34,416 - INFO - Updating computer ID 70 with purchase data: {'purchased': True, 'lifeExpectancy': 3, 'warrantyDate': '2024-11-24', 'vendor': 'AMIRIM', 'poDate': '2021-11-25', 'poNumber': '411469852-49285488'}
-2025-07-15 12:19:34,984 - INFO - Successfully updated computer ID 70
+================================================================================
+PURCHASE INFORMATION COMPARISON
+================================================================================
+📊 Summary:
+  • Devices in sync: 45
+  • Devices with differences: 8
+  • Devices not in Jamf Pro: 3
 
-=== SYNC COMPLETED ===
-Total ABM devices: 100
-Found in Jamf Pro: 95
-Updated successfully: 95
-Failed updates: 0
-Not found in Jamf Pro: 5
+Devices with purchase information differences:
+
+Serial Number: MXN8J2K9LM4P (Computer ID: 145)
+Model: MacBook Pro 13"
+Field                ABM                       Jamf
+----------------------------------------------------------------------
+Purchased            Yes                       No
+Vendor               TechSource Solutions      A7B9C2D
+Po Number            PO-2021-78456             None
+Warranty Date        2024-11-24               None
 ```
 
-### Test Mode Output
-
-When using `--test N`, additional information is shown:
+**Missing devices:**
 ```
-2025-07-15 12:19:31,773 - INFO - TEST MODE: Processing only 2 devices
-2025-07-15 12:19:31,773 - INFO - Processing device 1/2: C02G2034ML88
-2025-07-15 12:19:34,416 - INFO - Processing device 2/2: C02H4567ML99
-2025-07-15 12:19:35,500 - INFO - TEST MODE: Stopping after 2 devices
-=== SYNC COMPLETED ===
-TEST MODE: Processed 2 of 100 devices
+================================================================================
+DEVICES IN ABM BUT NOT IN JAMF PRO
+================================================================================
+Found 3 devices in ABM that are not in Jamf Pro:
+
+Serial Number   Model                Added to Org  Order Number
+--------------------------------------------------------------------------------
+MXN8J2K9LM4P   MacBook Pro 13"      2021-11-25    PO-2021-78456
+QR5T8W2X9Y3Z   MacBook Air 13"      2022-03-15    PO-2022-91234
+VB7N4M8K6L2J   iMac 24"             2023-01-10    PO-2023-45678
+
+📄 Detailed data exported to missing_devices.csv
 ```
 
 ## 🔧 API Requirements
@@ -183,34 +251,64 @@ TEST MODE: Processed 2 of 100 devices
 - **Endpoint**: `https://api-business.apple.com/v1/orgDevices`
 - **Authentication**: Bearer token
 - **Permissions**: Read access to organization devices
+- **Features**: Full pagination support for large device inventories
 
 ### Jamf Pro
 - **Search Endpoint**: `/JSSResource/computers/serialnumber/{serial}` (Classic API)
 - **Update Endpoint**: `/api/v1/computers-inventory-detail/{id}` (Modern API)
 - **Authentication**: Bearer token
-- **Permissions**: Read and update computer inventory
+- **Permissions**: 
+  - **Sync script**: Read and update computer inventory
+  - **Compare script**: Read-only computer inventory access
 
 ## 🛡️ Security Considerations
 
 - **Token Management**: Tokens are retrieved from external shell scripts, never hardcoded
-- **API Rate Limiting**: The script includes built-in rate limiting for API calls
+- **API Rate Limiting**: Built-in rate limiting respects API guidelines
 - **Error Handling**: Comprehensive error handling prevents data corruption
 - **Logging**: Detailed logging for audit trails and troubleshooting
+- **Read-Only Mode**: Comparison script requires no write permissions
 
 ## 🐛 Troubleshooting
 
 ### Common Issues
 
-1. **"Exec format error"**: Ensure shell scripts have `#!/bin/bash` shebang and are executable
-2. **"404 Not Found"**: Device exists in ABM but not in Jamf Pro (expected behavior)
-3. **"415 Unsupported Media Type"**: Using wrong API version (script uses correct v1 API)
-4. **"401 Unauthorized"**: Check token permissions and expiration
+1. **"Exec format error"**: 
+   - Ensure shell scripts have `#!/bin/bash` shebang and are executable
+   - Run: `chmod +x get_abm_token.sh get_jamf_token.sh`
+
+2. **"404 Not Found"**: 
+   - Device exists in ABM but not in Jamf Pro (expected for comparison script)
+   - Check Jamf Pro enrollment status
+
+3. **"401 Unauthorized"**: 
+   - Check token permissions and expiration
+   - Verify script paths are correct
+
+4. **"Failed to resolve hostname"**:
+   - Check JAMF_SERVER_URL format: `https://company.jamfcloud.com`
+   - Ensure no double `https://` in URL
+
+5. **"Only getting 100 devices"**:
+   - Check pagination logs for cursor information
+   - Verify ABM token has access to all devices
 
 ### Debug Mode
 
-Enable debug logging by changing the logging level:
+Enable debug logging by changing the logging level in either script:
 ```python
 logging.basicConfig(level=logging.DEBUG)
+```
+
+### Quick URL Fix
+
+To quickly update the Jamf Pro URL in scripts:
+```bash
+# macOS/BSD sed
+sed -i '' 's|https://your-jamf-server.com|https://company.jamfcloud.com|g' *.py
+
+# Linux sed  
+sed -i 's|https://your-jamf-server.com|https://company.jamfcloud.com|g' *.py
 ```
 
 ## 🤝 Contributing
@@ -221,6 +319,14 @@ logging.basicConfig(level=logging.DEBUG)
 4. Push to the branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
 
+### Development Guidelines
+
+- **Documentation**: Update README for any new features
+- **Error Handling**: Include comprehensive error handling
+- **Logging**: Add appropriate log messages for debugging
+- **Testing**: Test with small datasets first (`--test` flag)
+- **Comments**: Document complex logic and API interactions
+
 ## 📝 License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
@@ -228,17 +334,14 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## 🙏 Acknowledgments
 
 - Apple Business Manager API documentation
-- Jamf Pro API documentation
+- Jamf Pro API documentation  
 - Python `requests` library maintainers
-
-## 📞 Support
-
-If you encounter any issues or have questions:
-
-1. Check the [Issues](https://github.com/yourusername/abm-jamf-sync/issues) page
-2. Create a new issue with detailed information
-3. Include log output and error messages
+- macOS system administrators community
 
 ---
 
-**Note**: This script is provided as-is. Always test in a development environment before running in production.
+**⚠️ Important Notes:**
+- Always test in a development environment before running in production
+- The sync script modifies Jamf Pro data - use dry run mode first
+- The comparison script is read-only and safe to run anytime
+- Keep your API tokens secure and rotate them regularly
