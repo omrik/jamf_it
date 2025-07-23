@@ -371,6 +371,10 @@ def update_jamf_computer(computer_id: int, purchase_data: Dict, jamf_token: str,
     
     response = requests.patch(url, headers=headers, json=json_payload)
     
+    # Check for token expiration
+    if response.status_code == 401:
+        raise TokenExpiredError("Jamf Pro token expired during computer update")
+    
     if response.status_code == 200:
         logger.info(f"Successfully updated computer ID {computer_id}")
         return True
@@ -471,7 +475,7 @@ def main():
     args = parser.parse_args()
     
     # Configuration
-    JAMF_SERVER_URL = "https://your-jamf-server.com"
+    JAMF_SERVER_URL = "https://assuredallies.jamfcloud.com"
     
     try:
         # Get tokens from shell scripts
