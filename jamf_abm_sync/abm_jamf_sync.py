@@ -88,6 +88,8 @@ def get_devices_from_abm(abm_token: str) -> List[DeviceInfo]:
     }
     
     cursor = None
+    page = 1
+    
     while True:
         # Build API request
         url = f"{base_url}/orgDevices"
@@ -96,13 +98,18 @@ def get_devices_from_abm(abm_token: str) -> List[DeviceInfo]:
             params["cursor"] = cursor
         
         # Make request
+        logger.info(f"Fetching page {page} from ABM...")
         response = requests.get(url, headers=headers, params=params)
         response.raise_for_status()
         data = response.json()
         
         # Process devices - Apple Business Manager uses 'data' array
         device_list = data.get('data', [])
-        logger.info(f"Found {len(device_list)} devices in this batch")
+        logger.info(f"Found {len(device_list)} devices in page {page}")
+        
+        if not device_list:
+            logger.info("No more devices found, pagination complete")
+            break
         
         for device_data in device_list:
             # Extract attributes from the nested structure
@@ -117,12 +124,32 @@ def get_devices_from_abm(abm_token: str) -> List[DeviceInfo]:
             )
             devices.append(device)
         
-        # Check for more pages
-        cursor = data.get('cursor')
+        # Check for next page using links.next or extract cursor from URL
+        links = data.get('links', {})
+        meta = data.get('meta', {})
+        
+        next_url = links.get('next')
+        if next_url:
+            # Extract cursor from the next URL
+            from urllib.parse import urlparse, parse_qs
+            parsed_url = urlparse(next_url)
+            query_params = parse_qs(parsed_url.query)
+            cursor = query_params.get('cursor', [None])[0]
+            logger.info(f"Moving to page {page + 1} with cursor from next URL")
+        elif 'cursor' in meta:
+            cursor = meta['cursor']  
+            logger.info(f"Moving to page {page + 1} with meta cursor")
+        else:
+            cursor = None
+            logger.info("No pagination info found")
+        
         if not cursor:
+            logger.info("No more pages available, pagination complete")
             break
+        
+        page += 1
     
-    logger.info(f"Retrieved {len(devices)} devices from ABM")
+    logger.info(f"Retrieved {len(devices)} devices from ABM across {page} pages")
     return devices
 
 def load_vendor_mapping(mapping_file: str = "vendor_mapping.json") -> Dict[str, str]:
@@ -304,7 +331,7 @@ def create_jamf_purchase_data(device: DeviceInfo, vendor_mapping: Dict[str, str]
     
     return purchase_data
 
-def update_jamf_computer(computer_id: int, purchase_data: Dict, jamf_token: str, jamf_server_url: str) -> bool:
+def update_jamf_computer(computer_id: int, purchase_data: Dict, jamf_token: str, jamf_server_url: str, dry_run: bool = False) -> bool:
     """
     Update computer purchasing information in Jamf Pro using v1 API
     
@@ -313,10 +340,16 @@ def update_jamf_computer(computer_id: int, purchase_data: Dict, jamf_token: str,
         purchase_data: Purchase information to update
         jamf_token: Jamf Pro API token
         jamf_server_url: Jamf Pro server URL
+        dry_run: If True, only log what would be updated without making changes
         
     Returns:
-        True if successful, False otherwise
+        True if successful (or if dry run), False otherwise
     """
+    if dry_run:
+        logger.info(f"DRY RUN: Would update computer ID {computer_id}")
+        logger.info(f"DRY RUN: Purchase data: {json.dumps(purchase_data, indent=2)}")
+        return True
+    
     url = f"{jamf_server_url}/api/v1/computers-inventory-detail/{computer_id}"
     headers = {
         'Authorization': f'Bearer {jamf_token}',
@@ -346,7 +379,7 @@ def update_jamf_computer(computer_id: int, purchase_data: Dict, jamf_token: str,
         logger.error(f"Response: {response.text}")
         return False
 
-def sync_devices(abm_token: str, jamf_token: str, jamf_server_url: str, test_limit: Optional[int] = None):
+def sync_devices(abm_token: str, jamf_token: str, jamf_server_url: str, test_limit: Optional[int] = None, dry_run: bool = False):
     """
     Main sync function - orchestrates the entire process
     
@@ -355,11 +388,15 @@ def sync_devices(abm_token: str, jamf_token: str, jamf_server_url: str, test_lim
         jamf_token: Jamf Pro API token
         jamf_server_url: Jamf Pro server URL
         test_limit: Optional limit on number of devices to process for testing
+        dry_run: If True, show what would be updated without making changes
     """
     logger.info("Starting device sync process...")
     
     if test_limit:
         logger.info(f"TEST MODE: Processing only {test_limit} devices")
+    
+    if dry_run:
+        logger.info("DRY RUN MODE: No actual updates will be made")
     
     # Load vendor mapping
     vendor_mapping = load_vendor_mapping()
@@ -400,10 +437,13 @@ def sync_devices(abm_token: str, jamf_token: str, jamf_server_url: str, test_lim
         # Step 5: Create purchase data with vendor mapping
         purchase_data = create_jamf_purchase_data(device, vendor_mapping)
         
-        logger.info(f"Updating computer ID {computer_id} with purchase data: {purchase_data}")
+        if dry_run:
+            logger.info(f"DRY RUN: Would update computer ID {computer_id}")
+        else:
+            logger.info(f"Updating computer ID {computer_id} with purchase data: {purchase_data}")
         
-        # Step 6: Update Jamf Pro
-        if update_jamf_computer(computer_id, purchase_data, jamf_token, jamf_server_url):
+        # Step 6: Update Jamf Pro (or simulate in dry run)
+        if update_jamf_computer(computer_id, purchase_data, jamf_token, jamf_server_url, dry_run=dry_run):
             updated_successfully += 1
         else:
             failed_updates += 1
@@ -412,10 +452,12 @@ def sync_devices(abm_token: str, jamf_token: str, jamf_server_url: str, test_lim
     logger.info("=== SYNC COMPLETED ===")
     if test_limit:
         logger.info(f"TEST MODE: Processed {min(test_limit, total_devices)} of {total_devices} devices")
+    if dry_run:
+        logger.info("DRY RUN MODE: No actual changes were made")
     logger.info(f"Total ABM devices: {total_devices}")
     logger.info(f"Found in Jamf Pro: {found_in_jamf}")
-    logger.info(f"Updated successfully: {updated_successfully}")
-    logger.info(f"Failed updates: {failed_updates}")
+    logger.info(f"{'Would be updated' if dry_run else 'Updated successfully'}: {updated_successfully}")
+    logger.info(f"{'Would fail to update' if dry_run else 'Failed updates'}: {failed_updates}")
     logger.info(f"Not found in Jamf Pro: {not_found_in_jamf}")
 
 def main():
@@ -437,11 +479,7 @@ def main():
         JAMF_TOKEN = get_token_from_script("get_jamf_token.sh", "Jamf Pro")
         
         # Handle dry run mode
-        if args.dry_run:
-            logger.info("DRY RUN MODE: No actual updates will be made")
-            # You can implement dry run logic here if needed
-        
-        sync_devices(ABM_TOKEN, JAMF_TOKEN, JAMF_SERVER_URL, test_limit=args.test)
+        sync_devices(ABM_TOKEN, JAMF_TOKEN, JAMF_SERVER_URL, test_limit=args.test, dry_run=args.dry_run)
         
     except Exception as e:
         logger.error(f"Sync failed: {e}")
