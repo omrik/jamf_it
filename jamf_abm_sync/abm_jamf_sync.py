@@ -475,7 +475,7 @@ def main():
     args = parser.parse_args()
     
     # Configuration
-    JAMF_SERVER_URL = "https://assuredallies.jamfcloud.com"
+    JAMF_SERVER_URL = "https://your-server.jamfcloud.com"
     
     try:
         # Get tokens from shell scripts
