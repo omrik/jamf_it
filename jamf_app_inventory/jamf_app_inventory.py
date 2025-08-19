@@ -14,6 +14,7 @@ Key Features:
 - No need for manual version tracking - uses the newest discovered version as the reference
 - Highlights computers with outdated versions of any application
 - Simple, concise reports with the information you need
+- Uses modular API client for enhanced reliability and error handling
 
 API Requirements:
 - Access to the Jamf Pro Classic API through API Roles and Clients
@@ -21,69 +22,24 @@ API Requirements:
 - Classic API: Read, Computers: Read, Computer Groups: Read
 
 Author: Omri Kedem
-Version: 2.0.0
+Version: 3.0.0
 License: MIT
 """
 
 import argparse
-import base64
 import csv
 import datetime
-import json
-import os
 import re
-import requests
-import subprocess
 import sys
 import xml.etree.ElementTree as ET
 from collections import defaultdict
-from urllib3.exceptions import InsecureRequestWarning
 
-# Suppress insecure HTTPS warnings (remove in production or use proper certificates)
-requests.packages.urllib3.disable_warnings(category=InsecureRequestWarning)
+# Import our custom API client
+from jamf_api_client import JamfAPIClient
 
 #------------------------------------------------------------------------------
-# Core Functions
+# Version Comparison Functions
 #------------------------------------------------------------------------------
-
-def get_token():
-    """
-    Get the API token from an external script.
-    
-    Returns:
-        str: The API token if successful, None otherwise.
-    """
-    try:
-        token = subprocess.check_output(['bash', './jamf_get_token.sh'], encoding="utf-8").strip()
-        return token
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        return None
-
-def create_filename(prefix, group_name=None):
-    """
-    Create a sanitized filename based on prefix and group name.
-    
-    Args:
-        prefix (str): Prefix for the filename
-        group_name (str, optional): Name of the computer group
-        
-    Returns:
-        str: A sanitized filename suitable for any filesystem
-    """
-    # Format current date
-    date_str = datetime.datetime.now().strftime('%Y-%m-%d')
-    
-    # Create filename with timestamp
-    if group_name:
-        # Sanitize group name
-        sanitized_group = group_name.replace('/', '_').replace('\\', '_')
-        sanitized_group = sanitized_group.replace(':', '_').replace('*', '_').replace('?', '_')
-        sanitized_group = sanitized_group.replace('"', '_').replace('<', '_').replace('>', '_')
-        sanitized_group = sanitized_group.replace('|', '_').replace(' ', '_')
-        
-        return f"{prefix}_{sanitized_group}_{date_str}.csv"
-    else:
-        return f"{prefix}_{date_str}.csv"
 
 def version_key(version_str):
     """
@@ -136,86 +92,45 @@ def compare_versions(version1, version2):
         return 0
 
 #------------------------------------------------------------------------------
-# Jamf API Functions
+# Helper Functions
 #------------------------------------------------------------------------------
 
-def get_computer_ids(server, auth_header, verify_ssl=True):
+def create_filename(prefix, group_name=None):
     """
-    Fetch all computer IDs from Jamf Pro.
+    Create a sanitized filename based on prefix and group name.
     
     Args:
-        server (str): Jamf Pro server URL
-        auth_header (dict): Authentication header
-        verify_ssl (bool): Whether to verify SSL certificates
+        prefix (str): Prefix for the filename
+        group_name (str, optional): Name of the computer group
         
     Returns:
-        list: List of tuples containing (computer_id, computer_name)
+        str: A sanitized filename suitable for any filesystem
     """
-    # Ensure server URL doesn't end with a trailing slash
-    server = server.rstrip('/')
-    url = f"{server}/JSSResource/computers"
-    headers = {
-        'Accept': 'application/json'
-    }
-    headers.update(auth_header)
+    # Format current date
+    date_str = datetime.datetime.now().strftime('%Y-%m-%d')
     
-    try:
-        response = requests.get(url, headers=headers, verify=verify_ssl)
-        response.raise_for_status()
+    # Create filename with timestamp
+    if group_name:
+        # Sanitize group name
+        sanitized_group = group_name.replace('/', '_').replace('\\', '_')
+        sanitized_group = sanitized_group.replace(':', '_').replace('*', '_').replace('?', '_')
+        sanitized_group = sanitized_group.replace('"', '_').replace('<', '_').replace('>', '_')
+        sanitized_group = sanitized_group.replace('|', '_').replace(' ', '_')
         
-        computers = response.json()['computers']
-        return [(computer['id'], computer['name']) for computer in computers]
-    except requests.exceptions.RequestException as e:
-        print(f"Error fetching computer IDs: {e}", file=sys.stderr)
-        sys.exit(1)
+        return f"{prefix}_{sanitized_group}_{date_str}.csv"
+    else:
+        return f"{prefix}_{date_str}.csv"
 
-def get_computer_group_members(server, auth_header, group_name, verify_ssl=True):
+#------------------------------------------------------------------------------
+# Enhanced Jamf API Functions using API Client
+#------------------------------------------------------------------------------
+
+def get_computer_applications(api_client, computer_id, computer_name, verify_ssl=True, debug=False):
     """
-    Fetch the list of computer IDs that belong to a specific computer group.
+    Fetch all applications installed on a specific computer using the API client.
     
     Args:
-        server (str): Jamf Pro server URL
-        auth_header (dict): Authentication header
-        group_name (str): Name of the computer group
-        verify_ssl (bool): Whether to verify SSL certificates
-        
-    Returns:
-        list: List of tuples containing (computer_id, computer_name)
-    """
-    # Ensure server URL doesn't end with a trailing slash
-    server = server.rstrip('/')
-    
-    # First, find the group ID by name
-    url = f"{server}/JSSResource/computergroups/name/{group_name}"
-    headers = {
-        'Accept': 'application/json'
-    }
-    headers.update(auth_header)
-    
-    try:
-        response = requests.get(url, headers=headers, verify=verify_ssl)
-        response.raise_for_status()
-        
-        group_data = response.json()
-        computer_list = []
-        
-        # Extract computer ID and name from the group
-        if 'computer_group' in group_data and 'computers' in group_data['computer_group']:
-            for computer in group_data['computer_group']['computers']:
-                computer_list.append((computer['id'], computer['name']))
-        
-        return computer_list
-    except requests.exceptions.RequestException as e:
-        print(f"Error fetching computer group '{group_name}': {e}", file=sys.stderr)
-        sys.exit(1)
-
-def get_computer_applications(server, auth_header, computer_id, computer_name, verify_ssl=True, debug=False):
-    """
-    Fetch all applications installed on a specific computer.
-    
-    Args:
-        server (str): Jamf Pro server URL
-        auth_header (dict): Authentication header
+        api_client (JamfAPIClient): The API client instance
         computer_id (int): Computer ID
         computer_name (str): Computer name
         verify_ssl (bool): Whether to verify SSL certificates
@@ -224,22 +139,20 @@ def get_computer_applications(server, auth_header, computer_id, computer_name, v
     Returns:
         tuple: (list of application dictionaries, computer general info dictionary)
     """
-    # Ensure server URL doesn't end with a trailing slash
-    server = server.rstrip('/')
-    url = f"{server}/JSSResource/computers/id/{computer_id}"
+    url = f"{api_client.server}/JSSResource/computers/id/{computer_id}"
     
     # Use XML for more reliable parsing
-    headers = {
-        'Accept': 'text/xml'
-    }
-    headers.update(auth_header)
+    headers = {'Accept': 'text/xml'}
     
     try:
         if debug:
             print(f"Fetching applications for computer {computer_name} (ID: {computer_id})...")
         
-        response = requests.get(url, headers=headers, verify=verify_ssl)
-        response.raise_for_status()
+        response = api_client.make_request(url, headers=headers, verify_ssl=verify_ssl)
+        
+        if not response:
+            print(f"\nWarning: Could not retrieve data for computer {computer_name} (ID: {computer_id})")
+            return [], {}
         
         # Parse XML response
         root = ET.fromstring(response.text)
@@ -274,9 +187,46 @@ def get_computer_applications(server, auth_header, computer_id, computer_name, v
             print(f"Found {len(applications)} applications on {computer_name}")
         
         return applications, computer_info
-    except requests.exceptions.RequestException as e:
-        print(f"Error fetching applications for computer {computer_name} (ID: {computer_id}): {e}", file=sys.stderr)
+        
+    except Exception as e:
+        print(f"\nError fetching applications for computer {computer_name} (ID: {computer_id}): {e}", file=sys.stderr)
         return [], {}
+
+def get_computer_group_members_enhanced(api_client, group_name, verify_ssl=True):
+    """
+    Fetch the list of computer IDs that belong to a specific computer group using the API client.
+    
+    Args:
+        api_client (JamfAPIClient): The API client instance
+        group_name (str): Name of the computer group
+        verify_ssl (bool): Whether to verify SSL certificates
+        
+    Returns:
+        list: List of tuples containing (computer_id, computer_name)
+    """
+    url = f"{api_client.server}/JSSResource/computergroups/name/{group_name}"
+    headers = {'Accept': 'application/json'}
+    
+    try:
+        response = api_client.make_request(url, headers=headers, verify_ssl=verify_ssl)
+        
+        if not response:
+            print(f"Error: Could not fetch computer group '{group_name}'", file=sys.stderr)
+            sys.exit(1)
+        
+        group_data = response.json()
+        computer_list = []
+        
+        # Extract computer ID and name from the group
+        if 'computer_group' in group_data and 'computers' in group_data['computer_group']:
+            for computer in group_data['computer_group']['computers']:
+                computer_list.append((computer['id'], computer['name']))
+        
+        return computer_list
+        
+    except Exception as e:
+        print(f"Error fetching computer group '{group_name}': {e}", file=sys.stderr)
+        sys.exit(1)
 
 #------------------------------------------------------------------------------
 # Command Line Interface
@@ -305,6 +255,7 @@ def parse_arguments():
                         help='Minimum number of different versions required to flag an app (default: 2)')
     parser.add_argument('--insecure', action='store_true', help='Skip SSL certificate verification')
     parser.add_argument('--debug', action='store_true', help='Enable debug mode with verbose output')
+    parser.add_argument('--delay', type=float, default=0.5, help='Delay between API requests in seconds (default: 0.5)')
     
     return parser.parse_args()
 
@@ -321,29 +272,36 @@ def main():
     if not args.server.startswith('http'):
         args.server = 'https://' + args.server
     
-    # Prepare authentication
-    auth_header = {}
-    if args.token:
-        token = get_token()
-        if not token:
-            print("Error: Token authentication selected but token retrieval failed. Ensure jamf_get_token.sh is available and working.", file=sys.stderr)
+    # Create API client with enhanced error handling and rate limiting
+    api_client = JamfAPIClient(
+        server=args.server,
+        username=args.username,
+        password=args.password,
+        use_token=args.token,
+        request_delay=args.delay
+    )
+    
+    # Test authentication first
+    try:
+        print("Testing API authentication...")
+        test_response = api_client.make_request(f"{api_client.server}/JSSResource/computers", 
+                                              headers={'Accept': 'application/json'}, 
+                                              verify_ssl=not args.insecure)
+        if not test_response:
+            print("Error: Failed to authenticate with Jamf Pro API", file=sys.stderr)
             sys.exit(1)
-        auth_header = {'Authorization': f'Bearer {token}'}
-    elif args.username and args.password:
-        # Using Basic Auth for the classic API
-        auth_string = base64.b64encode(f"{args.username}:{args.password}".encode()).decode()
-        auth_header = {'Authorization': f'Basic {auth_string}'}
-    else:
-        print("Error: Either provide username and password or use token authentication.", file=sys.stderr)
+        print("✓ Authentication successful")
+    except Exception as e:
+        print(f"Error: Authentication failed - {e}", file=sys.stderr)
         sys.exit(1)
     
     # Get computer IDs - either from a specific group or all computers
     if args.group:
         print(f"Getting computers from group: {args.group}")
-        computers = get_computer_group_members(args.server, auth_header, args.group, verify_ssl=not args.insecure)
+        computers = get_computer_group_members_enhanced(api_client, args.group, verify_ssl=not args.insecure)
         print(f"Found {len(computers)} computers in group '{args.group}'.")
     else:
-        computers = get_computer_ids(args.server, auth_header, verify_ssl=not args.insecure)
+        computers = api_client.get_computers(verify_ssl=not args.insecure)
         print(f"Found {len(computers)} computers in Jamf Pro.")
     
     if not computers:
@@ -364,17 +322,23 @@ def main():
     
     # Process each computer
     total_computers = len(computers)
+    print(f"Starting inventory collection for {total_computers} computers...")
+    
     for index, (computer_id, computer_name) in enumerate(computers):
-        print(f"Processing computer {index+1}/{total_computers}: {computer_name}", end='\r')
+        if args.debug:
+            print(f"\nProcessing computer {index+1}/{total_computers}: {computer_name} (ID: {computer_id})")
+        else:
+            print(f"Processing computer {index+1}/{total_computers}: {computer_name}", end='\r')
         
-        # Get applications for this computer
+        # Get applications for this computer using the API client
         applications, computer_info = get_computer_applications(
-            args.server, auth_header, computer_id, computer_name, 
+            api_client, computer_id, computer_name, 
             verify_ssl=not args.insecure, debug=args.debug
         )
         
         if not computer_info:
-            print(f"\nWarning: Could not retrieve information for computer {computer_name} (ID: {computer_id})")
+            if args.debug:
+                print(f"Warning: Could not retrieve information for computer {computer_name} (ID: {computer_id})")
             continue
         
         # Store computer details
@@ -385,22 +349,32 @@ def main():
             app_name = app['application_name']
             app_version = app['application_version']
             
+            # Skip system applications and empty entries
+            if app_name == 'Unknown' or not app_name.strip():
+                continue
+            
             # Add to versions list for this application
             app_versions[app_name].append(app_version)
             
             # Track application installations with computer info
             app_installations[app_name].append((computer_id, app_version))
     
-    print("\nProcessing complete.")
+    print(f"\nProcessing complete. Found {len(app_versions)} unique applications.")
     
     # Determine latest version of each application and find outdated computers
     latest_versions = {}  # Application name -> latest version
     computer_outdated_apps = defaultdict(list)  # Computer ID -> list of (app_name, installed_version, latest_version)
     
+    print("Analyzing application versions...")
     for app_name, versions in app_versions.items():
         # Find the latest version using our safe sorting function
         try:
-            latest_version = sorted(versions, key=version_key)[-1]
+            # Remove duplicates and sort
+            unique_versions = list(set(versions))
+            if len(unique_versions) < args.min_version_count:
+                continue
+                
+            latest_version = sorted(unique_versions, key=version_key)[-1]
             latest_versions[app_name] = latest_version
             
             # Check all installations to find outdated ones
@@ -410,10 +384,12 @@ def main():
                         (app_name, installed_version, latest_version)
                     )
         except Exception as e:
-            print(f"Warning: Error processing versions for {app_name}: {e}")
+            if args.debug:
+                print(f"Warning: Error processing versions for {app_name}: {e}")
     
     # Create applications summary report
     print(f"Generating applications summary report...")
+    apps_written = 0
     with open(apps_summary_filename, 'w', newline='') as csvfile:
         writer = csv.writer(csvfile)
         writer.writerow(['Application', 'Version Count', 'Newest Version', 'Oldest Version', 
@@ -424,7 +400,8 @@ def main():
             if versions:
                 try:
                     # Sort versions using the safe version comparison
-                    sorted_versions = sorted(versions, key=version_key)
+                    unique_versions = list(set(versions))
+                    sorted_versions = sorted(unique_versions, key=version_key)
                     oldest_version = sorted_versions[0]
                     newest_version = sorted_versions[-1]
                     
@@ -432,7 +409,8 @@ def main():
                     latest_version_count = versions.count(newest_version)
                     outdated_count = len(versions) - latest_version_count
                 except Exception as e:
-                    print(f"Warning: Error sorting versions for {app_name}: {e}")
+                    if args.debug:
+                        print(f"Warning: Error sorting versions for {app_name}: {e}")
                     oldest_version = "Error"
                     newest_version = "Error"
                     latest_version_count = 0
@@ -459,9 +437,11 @@ def main():
                     latest_version_count,
                     outdated_count
                 ])
+                apps_written += 1
     
-    print(f"Applications summary written to {apps_summary_filename}")
-    print(f"Found {len(app_versions)} unique applications across {len(computers)} computers")
+    print(f"✓ Applications summary written to {apps_summary_filename}")
+    print(f"  Found {len(app_versions)} unique applications across {len(computers)} computers")
+    print(f"  Wrote {apps_written} applications meeting criteria to report")
     
     # Create outdated computers report
     computers_with_outdated_apps = len(computer_outdated_apps)
@@ -471,7 +451,8 @@ def main():
             writer = csv.writer(csvfile)
             
             # Create header row
-            writer.writerow(['Computer Name', 'Serial Number', 'OS Version', 'Last Inventory Update', 'Outdated Apps Count', 'Outdated Applications'])
+            writer.writerow(['Computer Name', 'Serial Number', 'OS Version', 'Last Inventory Update', 
+                           'Outdated Apps Count', 'Outdated Applications'])
             
             for computer_id, outdated_apps in sorted(computer_outdated_apps.items(), 
                                                    key=lambda x: computer_details.get(x[0], {}).get('computer_name', '')):
@@ -493,10 +474,19 @@ def main():
                     '; '.join(outdated_apps_formatted)
                 ])
         
-        print(f"Outdated computers report written to {outdated_computers_filename}")
-        print(f"Found {computers_with_outdated_apps} computers with outdated applications")
+        print(f"✓ Outdated computers report written to {outdated_computers_filename}")
+        print(f"  Found {computers_with_outdated_apps} computers with outdated applications")
     else:
-        print("No outdated applications found. Skipping outdated computers report.")
+        print("✓ No outdated applications found. All computers are up to date!")
+    
+    # Final summary
+    print(f"\n🎯 Summary:")
+    print(f"   • Processed {total_computers} computers")
+    print(f"   • Found {len(app_versions)} unique applications")
+    print(f"   • Generated {apps_summary_filename}")
+    if computers_with_outdated_apps > 0:
+        print(f"   • Generated {outdated_computers_filename}")
+    print(f"   • Analysis complete!")
 
 #------------------------------------------------------------------------------
 # Entry Point
