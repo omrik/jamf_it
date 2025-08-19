@@ -1,100 +1,33 @@
 #!/usr/bin/env python3
 """
-Jamf Application Usage Reporter
+Jamf Application Usage Reporter - Modular Version
 
-This script retrieves application usage data from Jamf Pro API and outputs it to a CSV file.
-It shows the amount of minutes each computer has used a specific application.
+Enhanced version with improved error handling, token refresh, and batch processing.
+Uses the jamf_api_client module for robust API interactions.
 
-Features:
-- Retrieves app usage data for all computers or specific computer groups
-- Shows total minutes of usage per computer
-- Supports both username/password and token-based authentication
-- Auto-generates descriptive filenames for reports
-- Provides a discovery mode to list all applications found in usage data
-- Offers flexible app name matching for finding the right application
-- Includes debug mode for troubleshooting
-
-API Requirements:
-- Access to the Jamf Pro Classic API through API Roles and Clients
-- API role with read access to the required endpoints
-- If using token authentication, access to the /api/v1/auth/token endpoint
-
-Required API Privileges in the Role:
-- Classic API: Read (required for this script)
-- Computers: Read
-- Computer Extension Attributes: Read 
-- Static Computer Groups: Read
-- Smart Computer Groups: Read
-- Users: Read
-- Computer Reports: Read
-
-For more information on setting up API access, see the README.md file.
-
-
-
-
-Author: Omri Kedem 
-Version: 1.0.30
+Author: Your Name
+Version: 3.0.0
 License: MIT
 """
 
 import argparse
-import base64
 import csv
 import datetime
-import json
+import time
 import os
-import requests
-import subprocess
 import sys
-import xml.etree.ElementTree as ET
-from requests.auth import HTTPBasicAuth
-from urllib3.exceptions import InsecureRequestWarning
-
-# Suppress insecure HTTPS warnings (remove in production or use proper certificates)
-requests.packages.urllib3.disable_warnings(category=InsecureRequestWarning)
-
-#------------------------------------------------------------------------------
-# Core Functions
-#------------------------------------------------------------------------------
-
-def get_token():
-    """
-    Get the API token from an external script.
-    
-    Returns:
-        str: The API token if successful, None otherwise.
-    """
-    try:
-        token = subprocess.check_output(['bash', './jamf_get_token.sh'], encoding="utf-8").strip()
-        return token
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        return None
+from jamf_api_client import JamfAPIClient, save_progress, load_progress
 
 def create_filename(app_name, group_name=None, days=None):
-    """
-    Create a sanitized filename based on app name and group name.
-    
-    Args:
-        app_name (str): Name of the application
-        group_name (str, optional): Name of the computer group
-        days (int, optional): Number of days in the report
-        
-    Returns:
-        str: A sanitized filename suitable for any filesystem
-    """
-    # Sanitize app name for use in filename - remove extension and problematic characters
+    """Create a sanitized filename based on app name and group name."""
     sanitized_app = app_name.replace('.app', '').replace('/', '_').replace('\\', '_')
     sanitized_app = sanitized_app.replace(':', '_').replace('*', '_').replace('?', '_')
     sanitized_app = sanitized_app.replace('"', '_').replace('<', '_').replace('>', '_')
     sanitized_app = sanitized_app.replace('|', '_').replace(' ', '_')
     
-    # Format current date
     date_str = datetime.datetime.now().strftime('%Y-%m-%d')
     
-    # Create filename with timestamp
     if group_name:
-        # Sanitize group name too
         sanitized_group = group_name.replace('/', '_').replace('\\', '_')
         sanitized_group = sanitized_group.replace(':', '_').replace('*', '_').replace('?', '_')
         sanitized_group = sanitized_group.replace('"', '_').replace('<', '_').replace('>', '_')
@@ -110,328 +43,91 @@ def create_filename(app_name, group_name=None, days=None):
         else:
             return f"{sanitized_app}_{date_str}.csv"
 
-#------------------------------------------------------------------------------
-# Jamf API Functions
-#------------------------------------------------------------------------------
-
-def get_computer_ids(server, auth_header, verify_ssl=True):
+def find_app_usage(usage_data, app_name, debug=False):
     """
-    Fetch all computer IDs and serial numbers from Jamf Pro.
+    Find usage minutes for a specific application in the usage data.
     
     Args:
-        server (str): Jamf Pro server URL
-        auth_header (dict): Authentication header
-        verify_ssl (bool): Whether to verify SSL certificates
-        
-    Returns:
-        list: List of tuples containing (computer_id, computer_name, serial_number)
-    """
-    # Ensure server URL doesn't end with a trailing slash
-    server = server.rstrip('/')
-    url = f"{server}/JSSResource/computers"
-    headers = {
-        'Accept': 'application/json'
-    }
-    headers.update(auth_header)
-    
-    try:
-        response = requests.get(url, headers=headers, verify=verify_ssl)
-        response.raise_for_status()
-        
-        computers = response.json()['computers']
-        computer_data = []
-        
-        # Fetch details for each computer to get serial numbers
-        for computer in computers:
-            computer_id = computer['id']
-            computer_name = computer['name']
-            
-            # Get serial number from computer details
-            detail_url = f"{server}/JSSResource/computers/id/{computer_id}/subset/General"
-            try:
-                detail_response = requests.get(detail_url, headers=headers, verify=verify_ssl)
-                detail_response.raise_for_status()
-                details = detail_response.json()
-                
-                if 'general' in details['computer'] and 'serial_number' in details['computer']['general']:
-                    serial_number = details['computer']['general']['serial_number']
-                    computer_data.append((computer_id, computer_name, serial_number))
-                else:
-                    # Fall back to just ID and name if serial not found
-                    computer_data.append((computer_id, computer_name, None))
-            except:
-                # If detail fetch fails, fall back to just ID and name
-                computer_data.append((computer_id, computer_name, None))
-        
-        return computer_data
-    except requests.exceptions.RequestException as e:
-        print(f"Error fetching computer IDs: {e}", file=sys.stderr)
-        sys.exit(1)
-
-def get_computer_group_members(server, auth_header, group_name, verify_ssl=True):
-    """
-    Fetch the list of computer IDs that belong to a specific computer group.
-    
-    Args:
-        server (str): Jamf Pro server URL
-        auth_header (dict): Authentication header
-        group_name (str): Name of the computer group
-        verify_ssl (bool): Whether to verify SSL certificates
-        
-    Returns:
-        list: List of tuples containing (computer_id, computer_name, serial_number)
-    """
-    # Ensure server URL doesn't end with a trailing slash
-    server = server.rstrip('/')
-    
-    # First, find the group ID by name
-    url = f"{server}/JSSResource/computergroups/name/{group_name}"
-    headers = {
-        'Accept': 'application/json'
-    }
-    headers.update(auth_header)
-    
-    try:
-        response = requests.get(url, headers=headers, verify=verify_ssl)
-        response.raise_for_status()
-        
-        group_data = response.json()
-        computer_list = []
-        
-        # Extract computer ID and name from the group
-        if 'computer_group' in group_data and 'computers' in group_data['computer_group']:
-            for computer in group_data['computer_group']['computers']:
-                # Get serial number from computer details
-                detail_url = f"{server}/JSSResource/computers/id/{computer['id']}/subset/General"
-                try:
-                    detail_response = requests.get(detail_url, headers=headers, verify=verify_ssl)
-                    detail_response.raise_for_status()
-                    details = detail_response.json()
-                    
-                    if 'general' in details['computer'] and 'serial_number' in details['computer']['general']:
-                        serial_number = details['computer']['general']['serial_number']
-                        computer_list.append((computer['id'], computer['name'], serial_number))
-                    else:
-                        # Fall back to just ID and name if serial not found
-                        computer_list.append((computer['id'], computer['name'], None))
-                except:
-                    # If detail fetch fails, fall back to just ID and name
-                    computer_list.append((computer['id'], computer['name'], None))
-        
-        return computer_list
-    except requests.exceptions.RequestException as e:
-        print(f"Error fetching computer group '{group_name}': {e}", file=sys.stderr)
-        sys.exit(1)
-
-def list_all_apps(server, auth_header, computer_id, computer_name, serial_number, start_date, end_date, verify_ssl=True):
-    """
-    Fetch and list all applications used on a specific computer.
-    
-    Args:
-        server (str): Jamf Pro server URL
-        auth_header (dict): Authentication header
-        computer_id (int): Computer ID
-        computer_name (str): Computer name
-        serial_number (str): Computer serial number
-        start_date (str): Start date in YYYY-MM-DD format
-        end_date (str): End date in YYYY-MM-DD format
-        verify_ssl (bool): Whether to verify SSL certificates
-        
-    Returns:
-        dict: Dictionary with app names as keys and total minutes as values
-    """
-    # Ensure server URL doesn't end with a trailing slash
-    server = server.rstrip('/')
-    
-    # First try with serial number if available
-    if serial_number:
-        url = f"{server}/JSSResource/computerapplicationusage/serialnumber/{serial_number}/{start_date}_{end_date}"
-    else:
-        # Fall back to computer ID if no serial number
-        url = f"{server}/JSSResource/computerapplicationusage/id/{computer_id}/{start_date}_{end_date}"
-    
-    # Try with XML first, as this was how the original script worked
-    xml_headers = {
-        'Accept': 'text/xml'
-    }
-    xml_headers.update(auth_header)
-    
-    try:
-        response = requests.get(url, headers=xml_headers, verify=verify_ssl)
-        
-        # Skip if no data is available for this computer
-        if response.status_code == 404:
-            return None
-        
-        response.raise_for_status()
-        
-        # Try to parse XML response
-        root = ET.fromstring(response.text)
-        
-        all_apps = []
-        # Iterate through each day's usage data to collect app names
-        for usage_data in root.findall('.//usage'):
-            for app_elem in usage_data.findall('.//app'):
-                name_elem = app_elem.find('name')
-                foreground_elem = app_elem.find('foreground')
-                
-                if name_elem is not None and foreground_elem is not None:
-                    app_name = name_elem.text
-                    try:
-                        minutes = int(foreground_elem.text)
-                        all_apps.append((app_name, minutes))
-                    except (ValueError, TypeError):
-                        # Skip if minutes can't be converted to int
-                        pass
-        
-        # Return a dict with app names as keys and total minutes as values
-        app_usage = {}
-        for app_name, minutes in all_apps:
-            if app_name not in app_usage:
-                app_usage[app_name] = 0
-            app_usage[app_name] += minutes
-        
-        return app_usage
-        
-    except requests.exceptions.RequestException as e:
-        print(f"Error fetching app list for computer {computer_name} (ID: {computer_id}): {e}", file=sys.stderr)
-        return None
-
-def get_app_usage(server, auth_header, computer_id, computer_name, serial_number, app_name, start_date, end_date, verify_ssl=True, debug=False):
-    """
-    Fetch application usage for a specific computer.
-    
-    Args:
-        server (str): Jamf Pro server URL
-        auth_header (dict): Authentication header
-        computer_id (int): Computer ID
-        computer_name (str): Computer name
-        serial_number (str): Computer serial number
+        usage_data (dict): Dictionary with dates as keys and app lists as values
         app_name (str): Application name to search for
-        start_date (str): Start date in YYYY-MM-DD format
-        end_date (str): End date in YYYY-MM-DD format
-        verify_ssl (bool): Whether to verify SSL certificates
-        debug (bool): Whether to enable debug output
+        debug (bool): Enable debug output
         
     Returns:
         dict: Dictionary with dates as keys and minutes as values
     """
-    # Ensure server URL doesn't end with a trailing slash
-    server = server.rstrip('/')
+    app_name_clean = app_name.lower().strip()
+    app_name_no_ext = app_name_clean.replace('.app', '').strip()
     
-    # First try with serial number if available
-    if serial_number:
-        url = f"{server}/JSSResource/computerapplicationusage/serialnumber/{serial_number}/{start_date}_{end_date}"
-    else:
-        # Fall back to computer ID if no serial number
-        url = f"{server}/JSSResource/computerapplicationusage/id/{computer_id}/{start_date}_{end_date}"
+    apps_data = {}
     
-    # Try with XML first, as this was how the original script worked
-    xml_headers = {
-        'Accept': 'text/xml'
-    }
-    xml_headers.update(auth_header)
-    
-    try:
-        response = requests.get(url, headers=xml_headers, verify=verify_ssl)
-        
-        # Skip if no data is available for this computer
-        if response.status_code == 404:
-            if debug:
-                print(f"No data found for computer {computer_name} (ID: {computer_id})")
-            return None
-        
-        response.raise_for_status()
-        
-        # Try to parse XML response
-        root = ET.fromstring(response.text)
-        
-        apps_data = {}
-        # Prepare app name for flexible matching
-        app_name_clean = app_name.lower().strip()
-        app_name_no_ext = app_name_clean.replace('.app', '').strip()
-        
-        # Debugging: Print all app names found in XML
-        if debug:
-            all_app_names = set()
-            for usage_data in root.findall('.//usage'):
-                date_elem = usage_data.find('date')
-                date = date_elem.text if date_elem is not None else "Unknown"
+    for date, apps in usage_data.items():
+        for app in apps:
+            current_app = app['name']
+            current_app_clean = current_app.lower().strip()
+            current_app_no_ext = current_app_clean.replace('.app', '').strip()
+            
+            # Flexible app name matching
+            exact_match = (current_app_clean == app_name_clean)
+            no_ext_match = (current_app_no_ext == app_name_no_ext)
+            partial_match = (app_name_no_ext in current_app_no_ext)
+            contains_match = (app_name_clean in current_app_clean or 
+                             current_app_clean in app_name_clean)
+            
+            is_match = exact_match or no_ext_match or partial_match or contains_match
+            
+            if is_match:
+                if debug:
+                    print(f"Match found: '{current_app}' for search term '{app_name}'")
                 
-                for app_elem in usage_data.findall('.//app'):
-                    name_elem = app_elem.find('name')
-                    if name_elem is not None:
-                        all_app_names.add(name_elem.text)
-            
-            print(f"All app names found for computer {computer_name} (ID: {computer_id}):")
-            for name in sorted(all_app_names):
-                print(f"  - '{name}'")
-        
-        # Process usage data
-        for usage_data in root.findall('.//usage'):
-            date_elem = usage_data.find('date')
-            date = date_elem.text if date_elem is not None else "Unknown"
-            
-            if debug:
-                print(f"Processing date: {date} for computer {computer_name} (ID: {computer_id})")
-            
-            for app_elem in usage_data.findall('.//app'):
-                name_elem = app_elem.find('name')
-                foreground_elem = app_elem.find('foreground')
-                
-                if name_elem is not None and foreground_elem is not None:
-                    current_app = name_elem.text
-                    foreground_minutes = int(foreground_elem.text)
-                    
-                    if current_app:
-                        current_app_clean = current_app.lower().strip()
-                        current_app_no_ext = current_app_clean.replace('.app', '').strip()
-                        
-                        # Exact match check
-                        exact_match = (current_app_clean == app_name_clean)
-                        
-                        # No extension match
-                        no_ext_match = (current_app_no_ext == app_name_no_ext)
-                        
-                        # Partial match
-                        partial_match = (app_name_no_ext in current_app_no_ext)
-                        
-                        # String containment (both ways)
-                        contains_match = (app_name_clean in current_app_clean or 
-                                         current_app_clean in app_name_clean)
-                        
-                        is_match = exact_match or no_ext_match or partial_match or contains_match
-                        
-                        if is_match:
-                            if debug:
-                                print(f"Match found: '{current_app}' for search term '{app_name}'")
-                                print(f"  - Exact match: {exact_match}")
-                                print(f"  - No extension match: {no_ext_match}")
-                                print(f"  - Partial match: {partial_match}")
-                                print(f"  - Contains match: {contains_match}")
-                                print(f"  - Minutes: {foreground_minutes}")
-                            
-                            if date not in apps_data:
-                                apps_data[date] = 0
-                            apps_data[date] += foreground_minutes
-        
-        return apps_data
-    except requests.exceptions.RequestException as e:
-        print(f"Error fetching usage data for computer {computer_name} (ID: {computer_id}): {e}", file=sys.stderr)
-        return None
+                if date not in apps_data:
+                    apps_data[date] = 0
+                apps_data[date] += app['foreground']
+    
+    return apps_data
 
-#------------------------------------------------------------------------------
-# Command Line Interface
-#------------------------------------------------------------------------------
+def list_all_applications(api_client, computers, start_date, end_date, verify_ssl=True, max_computers=5):
+    """
+    List all applications found in usage data from a sample of computers.
+    
+    Args:
+        api_client (JamfAPIClient): Initialized API client
+        computers (list): List of computers to check
+        start_date (str): Start date in YYYY-MM-DD format
+        end_date (str): End date in YYYY-MM-DD format
+        verify_ssl (bool): Whether to verify SSL certificates
+        max_computers (int): Maximum number of computers to check
+        
+    Returns:
+        dict: Dictionary with app names as keys and total minutes as values
+    """
+    all_found_apps = {}
+    computers_to_check = computers[:max_computers]
+    
+    for computer_id, computer_name, serial_number in computers_to_check:
+        print(f"Fetching apps for {computer_name} (Serial: {serial_number or 'N/A'})...")
+        
+        usage_data = api_client.get_computer_application_usage(
+            computer_id, computer_name, serial_number, start_date, end_date, verify_ssl
+        )
+        
+        if usage_data:
+            app_count = 0
+            for date, apps in usage_data.items():
+                for app in apps:
+                    app_name = app['name']
+                    minutes = app['foreground']
+                    if app_name not in all_found_apps:
+                        all_found_apps[app_name] = 0
+                    all_found_apps[app_name] += minutes
+                    app_count += 1
+            
+            if app_count > 0:
+                print(f"Found {app_count} app entries for {computer_name}")
+    
+    return all_found_apps
 
 def parse_arguments():
-    """
-    Parse command-line arguments.
-    
-    Returns:
-        argparse.Namespace: Parsed arguments
-    """
-    # Default server URL (using a generic placeholder)
+    """Parse command-line arguments."""
     default_server = "https://your-instance.jamfcloud.com"
     
     parser = argparse.ArgumentParser(description="Retrieve application usage data from Jamf Pro API")
@@ -447,6 +143,9 @@ def parse_arguments():
     parser.add_argument('--insecure', action='store_true', help='Skip SSL certificate verification')
     parser.add_argument('--debug', action='store_true', help='Enable debug mode with verbose output')
     parser.add_argument('--list-apps', action='store_true', help='List all applications found in usage data for the first 5 computers')
+    parser.add_argument('--batch-size', type=int, default=50, help='Number of computers to process in each batch (default: 50)')
+    parser.add_argument('--delay', type=float, default=0.5, help='Delay between API requests in seconds (default: 0.5)')
+    parser.add_argument('--resume', action='store_true', help='Resume from previous progress file')
     
     args = parser.parse_args()
     
@@ -456,34 +155,22 @@ def parse_arguments():
     
     return args
 
-#------------------------------------------------------------------------------
-# Main Function
-#------------------------------------------------------------------------------
-
 def main():
     """Main function that runs the script."""
-    # Parse command-line arguments
     args = parse_arguments()
     
     # Ensure server URL is properly formatted
     if not args.server.startswith('http'):
         args.server = 'https://' + args.server
     
-    # Prepare authentication
-    auth_header = {}
-    if args.token:
-        token = get_token()
-        if not token:
-            print("Error: Token authentication selected but token retrieval failed. Ensure jamf_get_token.sh is available and working.", file=sys.stderr)
-            sys.exit(1)
-        auth_header = {'Authorization': f'Bearer {token}'}
-    elif args.username and args.password:
-        # Using Basic Auth for the classic API
-        auth_string = base64.b64encode(f"{args.username}:{args.password}".encode()).decode()
-        auth_header = {'Authorization': f'Basic {auth_string}'}
-    else:
-        print("Error: Either provide username and password or use token authentication.", file=sys.stderr)
-        sys.exit(1)
+    # Create API client
+    api_client = JamfAPIClient(
+        server=args.server,
+        username=args.username,
+        password=args.password,
+        use_token=args.token,
+        request_delay=args.delay
+    )
     
     # Calculate date range
     end_date = datetime.date.today()
@@ -496,48 +183,55 @@ def main():
     elif args.app:
         print(f"Fetching application usage for '{args.app}' from {start_date_str} to {end_date_str}...")
     
-    # Get computer IDs - either from a specific group or all computers
-    if args.group:
-        print(f"Getting computers from group: {args.group}")
-        computers = get_computer_group_members(args.server, auth_header, args.group, verify_ssl=not args.insecure)
-        print(f"Found {len(computers)} computers in group '{args.group}'.")
-    else:
-        computers = get_computer_ids(args.server, auth_header, verify_ssl=not args.insecure)
-        print(f"Found {len(computers)} computers in Jamf Pro.")
+    # Get computer IDs
+    try:
+        if args.group:
+            print(f"Getting computers from group: {args.group}")
+            computers = api_client.get_computer_group_members(args.group, verify_ssl=not args.insecure)
+            print(f"Found {len(computers)} computers in group '{args.group}'.")
+        else:
+            computers = api_client.get_computers(verify_ssl=not args.insecure)
+            # Convert to format with serial numbers (set to None for now)
+            computers = [(c[0], c[1], None) for c in computers]
+            print(f"Found {len(computers)} computers in Jamf Pro.")
+    except Exception as e:
+        print(f"Failed to get computer list: {e}")
+        sys.exit(1)
     
     if not computers:
         print("No computers found. Exiting.")
         sys.exit(0)
     
-    # If list-apps mode is enabled, just list app names from the first few computers
+    # Handle large batches
+    if len(computers) > 200:
+        print(f"Large batch detected ({len(computers)} computers). Enabling enhanced processing...")
+        api_client.request_delay = max(args.delay, 1.0)
+    
+    # Handle list-apps mode
     if args.list_apps:
-        print("\nListing all applications found in usage data (from the first 5 computers):")
-        all_found_apps = {}
-        computers_to_check = computers[:5]  # Limit to first 5 computers to avoid long wait times
-        
-        for computer_id, computer_name, serial_number in computers_to_check:
-            print(f"Fetching apps for {computer_name} (Serial: {serial_number or 'N/A'})...")
-            app_usage = list_all_apps(args.server, auth_header, computer_id, computer_name, serial_number, 
-                                     start_date_str, end_date_str, verify_ssl=not args.insecure)
-            if app_usage:
-                print(f"Found {len(app_usage)} apps for {computer_name}")
-                for app_name, minutes in app_usage.items():
-                    if app_name not in all_found_apps:
-                        all_found_apps[app_name] = 0
-                    all_found_apps[app_name] += minutes
+        all_found_apps = list_all_applications(
+            api_client, computers, start_date_str, end_date_str, 
+            verify_ssl=not args.insecure, max_computers=5
+        )
         
         if all_found_apps:
             print("\nApplications found in the usage data (sorted by total minutes):")
-            # Sort by total minutes, descending
             sorted_apps = sorted(all_found_apps.items(), key=lambda x: x[1], reverse=True)
             for app_name, minutes in sorted_apps:
                 print(f"- '{app_name}': {minutes} minutes")
             print(f"\nTotal unique applications found: {len(all_found_apps)}")
-            print("\nTo search for a specific app, run the script again with the -a option and the exact app name.")
         else:
-            print("No application usage data found for the first 5 computers.")
+            print("No application usage data found.")
         
         sys.exit(0)
+    
+    # Progress file for resume capability
+    progress_file = f"progress_{args.app.replace(' ', '_')}_{args.group or 'all'}.json"
+    processed_computers = set()
+    
+    if args.resume:
+        processed_computers = load_progress(progress_file)
+        print(f"Resuming from progress file. {len(processed_computers)} computers already processed.")
     
     # Generate output filename if not specified
     if not args.output:
@@ -546,56 +240,70 @@ def main():
     
     # Prepare CSV data
     csv_data = []
-    total_computers = len(computers)
-    matched_computers = 0
+    computers_to_process = [(c[0], c[1], c[2]) for c in computers if c[0] not in processed_computers]
     
-    # Process each computer
-    for index, (computer_id, computer_name, serial_number) in enumerate(computers):
-        if args.debug:
-            print(f"\nProcessing computer {index+1}/{total_computers}: {computer_name} (ID: {computer_id}, Serial: {serial_number or 'N/A'})")
-        else:
-            print(f"Processing computer {index+1}/{total_computers}: {computer_name}", end='\r')
+    print(f"Processing {len(computers_to_process)} computers (skipping {len(processed_computers)} already processed)...")
+    
+    # Process computers in batches
+    batch_size = args.batch_size
+    for batch_start in range(0, len(computers_to_process), batch_size):
+        batch_end = min(batch_start + batch_size, len(computers_to_process))
+        batch = computers_to_process[batch_start:batch_end]
         
-        # Ensure server URL doesn't end with a trailing slash
-        server_url = args.server.rstrip('/')
+        print(f"\nProcessing batch {batch_start//batch_size + 1}/{(len(computers_to_process) + batch_size - 1)//batch_size}")
+        print(f"Computers {batch_start + 1} to {batch_end} of {len(computers_to_process)} remaining")
         
-        # Some early debug analysis for the first few computers if debug mode
-        if args.debug and index < 3:
-            # Get all app names for this computer to help with debugging
-            app_usage = list_all_apps(server_url, auth_header, computer_id, computer_name, serial_number,
-                                     start_date_str, end_date_str, verify_ssl=not args.insecure)
-            if app_usage:
-                print(f"Applications found on {computer_name} (showing top 10 by usage):")
-                # Sort by minutes, take top 10
-                sorted_apps = sorted(app_usage.items(), key=lambda x: x[1], reverse=True)[:10]
-                for app_name, minutes in sorted_apps:
-                    print(f"  - '{app_name}': {minutes} minutes")
+        for computer_id, computer_name, serial_number in batch:
+            current_index = batch_start + batch.index((computer_id, computer_name, serial_number)) + 1
+            
+            if args.debug:
+                print(f"Processing: {computer_name} (ID: {computer_id}, Serial: {serial_number or 'N/A'})")
             else:
-                print(f"No application usage data found for {computer_name}")
+                print(f"Processing computer {current_index}/{len(computers_to_process)}: {computer_name}", end='\r')
+            
+            # Get usage data for this computer
+            usage_data = api_client.get_computer_application_usage(
+                computer_id, computer_name, serial_number, start_date_str, end_date_str, 
+                verify_ssl=not args.insecure
+            )
+            
+            if usage_data:
+                # Find usage for the specific app
+                app_usage = find_app_usage(usage_data, args.app, debug=args.debug)
                 
-        usage_data = get_app_usage(
-            server_url, auth_header, computer_id, computer_name, serial_number, args.app, 
-            start_date_str, end_date_str, verify_ssl=not args.insecure, debug=args.debug
-        )
+                if app_usage:
+                    total_minutes = sum(app_usage.values())
+                    if total_minutes > 0:
+                        csv_data.append({
+                            'Computer ID': computer_id,
+                            'Computer Name': computer_name,
+                            'Serial Number': serial_number or 'N/A',
+                            'Application': args.app,
+                            'Total Minutes': total_minutes,
+                            'Days Used': len(app_usage),
+                            'Average Minutes Per Day': round(total_minutes / len(app_usage), 2),
+                            'Date Range': f"{start_date_str} to {end_date_str}"
+                        })
+            
+            # Mark as processed
+            processed_computers.add(computer_id)
         
-        if usage_data:
-            matched_computers += 1
-            # Calculate total minutes across all days
-            total_minutes = sum(usage_data.values())
-            if total_minutes > 0:
-                # Add to CSV data if app was used
-                csv_data.append({
-                    'Computer ID': computer_id,
-                    'Computer Name': computer_name,
-                    'Serial Number': serial_number or 'N/A',
-                    'Application': args.app,
-                    'Total Minutes': total_minutes,
-                    'Days Used': len(usage_data),
-                    'Average Minutes Per Day': round(total_minutes / len(usage_data), 2),
-                    'Date Range': f"{start_date_str} to {end_date_str}"
-                })
+        # Save progress after each batch
+        save_progress(progress_file, processed_computers)
+        print(f"\nBatch complete. Progress saved. Found {len(csv_data)} computers with usage so far.")
+        
+        # Add a pause between batches for large operations
+        if len(computers_to_process) > 100:
+            print("Pausing briefly between batches...")
+            time.sleep(2)
     
     print("\nProcessing complete.")
+    
+    # Clean up progress file on successful completion
+    try:
+        os.remove(progress_file)
+    except FileNotFoundError:
+        pass
     
     # Write CSV file
     if csv_data:
@@ -608,22 +316,17 @@ def main():
         
         print(f"\nResults written to {args.output}")
         print(f"Found {len(csv_data)} computers using '{args.app}'")
+        print(f"Total computers processed: {len(processed_computers)}")
     else:
         print(f"\nNo usage data found for '{args.app}'")
         print("Possible reasons:")
         print("1. The application name might be different than what you provided")
         print("2. No computers have used this application in the specified time period")
-        print("3. The application usage data might not be available or is stored differently")
+        print("3. Application usage data might not be available")
         print("\nSuggestions:")
         print("- Try running with --list-apps to see all available applications")
         print("- Try a different app name format (with or without '.app' suffix)")
-        print("- Try a partial name match (e.g., 'Chrome' instead of 'Google Chrome.app')")
-        print("- Increase the number of days with -d option to look at a longer history")
         print("- Use --debug to see more detailed information about the API responses")
-
-#------------------------------------------------------------------------------
-# Entry Point
-#------------------------------------------------------------------------------
 
 if __name__ == "__main__":
     main()
