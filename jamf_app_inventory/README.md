@@ -9,11 +9,16 @@ A collection of Python scripts for Jamf Pro administrators to analyze applicatio
 
 ### 1. Application Usage Reporter
 
-The `jamf_app_usage.py` script analyzes how frequently applications are used across your Jamf-managed computers.
+The application usage reporter consists of two main files:
+- **`jamf_api_client.py`** - Robust API client library with token management, rate limiting, and error recovery
+- **`jamf_app_usage.py`** - Enhanced usage reporter with batch processing and resume capabilities
 
 **Key Features:**
 - Retrieves application usage data (minutes of usage) for all computers or specific groups
 - Reports which computers are using specific applications and for how long
+- Automatic token refresh for long-running operations
+- Rate limiting to avoid overwhelming the Jamf API
+- Progress saving and resume capability for large environments
 - Supports both username/password and token-based authentication
 - Auto-generates descriptive filenames for reports
 - Offers flexible app name matching for finding the right application
@@ -34,7 +39,6 @@ The `jamf_app_inventory.py` script provides a comprehensive inventory of install
 <details>
 <summary>Click to view screenshots</summary>
 
-
 <img width="812" alt="Screenshot of app report" src="https://github.com/user-attachments/assets/ea1a00f4-f656-49d2-ad97-156e685729ec" />
 
 <img width="812" alt="Screenshot of outdated computers" src="https://github.com/user-attachments/assets/387759d2-fb71-41c8-81b7-cbb81a601fac" />
@@ -53,7 +57,7 @@ The `jamf_app_inventory.py` script provides a comprehensive inventory of install
 1. Clone this repository:
    ```bash
    git clone https://github.com/omrik/jamf_it.git
-   cd jamf_it
+   cd jamf_it/jamf_app_inventory
    ```
 
 2. Install the required packages:
@@ -72,7 +76,7 @@ The `jamf_app_inventory.py` script provides a comprehensive inventory of install
    chmod +x jamf_get_token.sh
    ```
 
-## 🔑 API Authentication
+## 🔐 API Authentication
 
 ### Setting Up API Access in Jamf Pro
 
@@ -146,6 +150,12 @@ export JAMF_CLIENT_SECRET="your-super-secret-key"
 
 # Debug mode for troubleshooting
 ./jamf_app_usage.py -a "Adobe Photoshop.app" -t --debug
+
+# Resume from previous progress (for large environments)
+./jamf_app_usage.py -a "Microsoft Excel.app" -t --resume
+
+# Batch processing with custom settings
+./jamf_app_usage.py -a "AutoCAD.app" -t --batch-size 25 --delay 1.0
 ```
 
 ### Application Inventory Tracker
@@ -161,7 +171,7 @@ export JAMF_CLIENT_SECRET="your-super-secret-key"
 ./jamf_app_inventory.py -t -g "Engineering" -o "eng_inventory"
 ```
 
-## 📁 Output Examples
+## 📄 Output Examples
 
 ### Application Usage Report
 
@@ -225,21 +235,44 @@ cd examples
 ./batch_app_inventory.sh
 ```
 
+## 🏗️ Architecture
+
+### Modular Design
+
+The application usage reporter uses a modular architecture:
+
+- **`jamf_api_client.py`** - Core API client library that handles:
+  - Authentication (both basic auth and token-based)
+  - Automatic token refresh for long-running operations
+  - Rate limiting and retry logic
+  - Error handling and recovery
+  
+- **`jamf_app_usage.py`** - Main script that uses the API client for:
+  - Batch processing of large computer inventories
+  - Progress tracking and resume capability
+  - Flexible application name matching
+  - CSV report generation
+
+This modular approach makes the code more maintainable and allows for better error handling in large environments.
+
 ## 📂 Project Structure
 
 ```
 jamf_it/
-├── jamf_app_usage.py            # Application usage reporter script
-├── jamf_app_inventory.py        # Application inventory tracker script
-├── README.md                    # This documentation
-├── requirements.txt             # Python package dependencies
-├── LICENSE                      # MIT license
-├── .gitignore                   # Git ignore configuration
-├── jamf_get_token.sh.example    # Template for token authentication
-├── examples/                    # Example batch scripts
-│   ├── batch_app_inventory.sh   # Run inventory for multiple groups
-│   └── generate_usage_report.sh # Generate usage reports for multiple apps
-└── reports/                     # Generated reports (gitignored)
+├── jamf_app_inventory/              # Main project directory
+│   ├── jamf_app_usage.py     # Enhanced usage reporter script
+│   ├── jamf_api_client.py           # Core API client library
+│   ├── jamf_app_inventory.py        # Application inventory tracker script
+│   ├── README.md                    # This documentation
+│   ├── requirements.txt             # Python package dependencies
+│   ├── LICENSE                      # MIT license
+│   ├── .gitignore                   # Git ignore configuration
+│   ├── jamf_get_token.sh.example    # Template for token authentication
+│   ├── examples/                    # Example batch scripts
+│   │   ├── batch_app_inventory.sh   # Run inventory for multiple groups
+│   │   └── generate_usage_report.sh # Generate usage reports for multiple apps
+│   └── reports/                     # Generated reports (gitignored)
+└── other_projects/                  # Other jamf_it projects
 ```
 
 ## 🛠️ Troubleshooting
@@ -251,19 +284,29 @@ If you encounter issues:
    - Check that your Jamf Pro instance supports the Classic API
    - Try using the `--debug` flag to see detailed API responses
 
-2. **Version Comparison Issues**
+2. **Import Errors**
+   - Make sure you have `import os` and `import time` in your script imports
+   - Verify that `jamf_api_client.py` is in the same directory as your main script
+   - Check that all required packages are installed: `pip install -r requirements.txt`
+
+3. **Version Comparison Issues**
    - If applications have unusual version formats, check the debug output
    - Look for error messages during the version sorting process
 
-3. **Missing Data**
+4. **Missing Data**
    - Ensure computers have recent inventory updates in Jamf Pro
    - Check that application usage tracking is enabled in your Jamf Pro instance
+
+5. **Large Environment Performance**
+   - Use the `--batch-size` parameter to adjust processing batches
+   - Increase `--delay` between API calls if you're hitting rate limits
+   - Use `--resume` to continue from where you left off if the script is interrupted
 
 ## 📄 License
 
 [MIT](https://github.com/omrik/jamf_it/blob/main/LICENSE)
 
-## 👥 Contributing
+## 💥 Contributing
 
 Contributions are welcome! Please feel free to submit a pull request or open issues on the [GitHub repository](https://github.com/omrik/jamf_it/issues).
 
