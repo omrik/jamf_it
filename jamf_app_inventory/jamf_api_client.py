@@ -5,8 +5,8 @@ Jamf API Client Library
 A robust Python library for interacting with the Jamf Pro API.
 Handles authentication, token management, rate limiting, and error recovery.
 
-Author: Your Name
-Version: 1.0.0
+Author: Omri Kedem
+Version: 1.0.70
 License: MIT
 """
 
