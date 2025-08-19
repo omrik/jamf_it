@@ -5,8 +5,8 @@ Jamf Application Usage Reporter - Modular Version
 Enhanced version with improved error handling, token refresh, and batch processing.
 Uses the jamf_api_client module for robust API interactions.
 
-Author: Your Name
-Version: 3.0.0
+Author: Omri KEdem
+Version: 1.0.70
 License: MIT
 """
 
